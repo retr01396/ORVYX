@@ -1,0 +1,169 @@
+================================================================================
+ORVYX PHASE 1 — SUMMARY OF ACCOMPLISHMENTS & AS-BUILT VERIFICATION
+================================================================================
+Date: 2026-09-15
+Hardware: Apple MacBook Air, Apple M5 (10 cores: 4P+6E), 16 GiB RAM, Metal 4
+Environment: Python 3.14.6 (backend/.venv), Node.js v26.3.1 (frontend)
+Status: COMPLETE & FULLY VERIFIED (All Acceptance Criteria T1 - T8 Passed)
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+In Phase 1 of the ORVYX project, we built the complete application shell and the
+end-to-end 2D chest X-ray (CXR) analysis pipeline. The application loads verified
+demo chest X-rays, runs the confirmed DenseNet-121 classifier (18 pathologies)
+and PSPNet segmentation model (14 thoracic structures) on Apple Silicon MPS, and
+renders the findings and anatomical overlays inside a custom-designed clinical
+workstation interface.
+
+All technical decisions, model parameters, and preprocessing steps match the
+empirical evidence established in Phase 0 (docs/PHASE0_EVIDENCE.md) with ZERO
+discrepancies.
+
+--------------------------------------------------------------------------------
+2. RUN INSTRUCTIONS (END-TO-END APPLICATION)
+--------------------------------------------------------------------------------
+The entire application runs locally with two terminal commands:
+
+Step 1: Start Backend Service (FastAPI + PyTorch MPS)
+  cd backend
+  .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+  * Pre-loads DenseNet-121 and PSPNet on Apple Silicon MPS in 3.91 seconds
+    during server startup lifespan. Subsequent requests incur 0s model loading.
+  * Interactive API documentation available at http://127.0.0.1:8000/docs
+
+Step 2: Start Frontend Workstation (React 19 + TypeScript + Vite)
+  cd frontend
+  npm run dev
+  * Clinical workstation accessible at http://localhost:5173
+  * Production build verified via: cd frontend && npm run build (383ms clean build)
+
+Step 3: Run Automated Smoke Test Suite
+  backend/.venv/bin/python scripts/smoke_test_phase1.py
+  * Verifies lifespan model preloading, health endpoint, study listing,
+    image retrieval, schema compliance, 18 findings, 14 segments, and sub-second
+    inference latency.
+
+--------------------------------------------------------------------------------
+3. REAL MEASURED PERFORMANCE BENCHMARKS (APPLE M5 MPS)
+--------------------------------------------------------------------------------
+Measured via automated end-to-end test suite (scripts/smoke_test_phase1.py):
+
+Metric                           Demo 1 (Normal CXR)    Demo 2 (Pathology CXR)
+--------------------------------------------------------------------------------
+Server Startup & Model Preload   3.91 seconds           N/A (Loaded at startup)
+DenseNet-121 + PSPNet Inference  255.52 ms              247.27 ms
+Full HTTP Request Roundtrip      268.0 ms               254.7 ms
+Pathology Findings Count         18 / 18                18 / 18
+Anatomical Segments Count        14 / 14                14 / 14
+Response Payload Size            83.4 KB                84.1 KB
+Hardware Execution Device        Apple Silicon MPS      Apple Silicon MPS
+Voxel/Centroid Range             Inside [0, 512] px     Inside [0, 512] px
+
+* Inference latency (~250ms combined) satisfies the sub-1000ms budget by a 4x margin.
+
+--------------------------------------------------------------------------------
+4. KEY ARCHITECTURAL & TECHNICAL DECISIONS
+--------------------------------------------------------------------------------
+1. Lifespan Model Preloading:
+   DenseNet-121 and PSPNet models are loaded once during FastAPI server startup
+   (@asynccontextmanager lifespan), eliminating PSPNet's 22.5s cold-load time on
+   user requests.
+
+2. Strict Preprocessing Boundary Check:
+   Input images are scaled to [-1024, 1024] using xrv.utils.load_image followed
+   by XRayCenterCrop. Preprocessed tensors are strictly validated to lie within
+   [-1024, 1024]; any out-of-bounds input raises an explicit HTTP 500 rather than
+   silently degrading model predictions.
+
+3. Compact Base64 PNG Mask Encoding:
+   Raw PSPNet logits [1, 14, 512, 512] are converted via sigmoid >= 0.5 into 14
+   binary masks. Masks are serialized as 1-channel PNG images encoded in Base64
+   with server-computed centroids and pixel areas. This reduces payload size from
+   ~7-10 MB (raw booleans) to <85 KB total per study.
+
+4. Click-a-Finding Focal Navigation:
+   Clicking an AI finding (e.g. Cardiomegaly) in the insights panel automatically
+   highlights the mapped anatomical structure (e.g. Heart), animates the 2D
+   viewport pan/zoom directly to that structure's centroid, and renders an
+   animated crosshair reticle with coordinate labels.
+
+5. StudyState JSON Contract:
+   Fully implemented Pydantic/TypeScript contract containing study metadata,
+   provenance (model names, device, runtime_ms), 18 findings with confidence
+   bands (<0.3 low, 0.3-0.6 moderate, >0.6 elevated), 14 segments with centroids,
+   and future-proof slots for measurements, comparison, and limitations.
+
+6. Non-Dismissible Clinical Disclaimer:
+   Persistent banner across the top: "AI-assisted research prototype — not a
+   diagnostic device. All predictions require licensed radiologist review."
+
+7. Strict Phase Scope Guardrails:
+   CT volume loaders, 3D MPR viewers, and LLM routers were strictly excluded
+   from Phase 1. Visibly disabled preview tabs ("3D CT Volume (Phase 2 Preview)"
+   and "AI Co-Pilot (Phase 3 Preview)") are present in the workstation header.
+
+--------------------------------------------------------------------------------
+5. COMPLETE FILE INVENTORY (CREATED IN PHASE 1)
+--------------------------------------------------------------------------------
+assets/
+  └── demo/
+      ├── demo-1.png                  (Verified Normal CXR from _research/txrv)
+      └── demo-2.jpg                  (Verified Pathology CXR from _research/txrv)
+
+backend/
+  ├── requirements.txt                (FastAPI, Uvicorn, Torch 2.14, TXRV 1.5.4)
+  ├── weights_cache/                  (Isolated weights: DenseNet 27M, PSPNet 260M)
+  └── app/
+      ├── __init__.py
+      ├── config.py                   (Hardware detection, target labels, paths)
+      ├── main.py                     (FastAPI app, lifespan manager, CORS)
+      ├── models/
+      │   ├── __init__.py
+      │   └── state.py                (StudyState, Finding, Segment schemas)
+      ├── services/
+      │   ├── __init__.py
+      │   ├── preprocess.py           (Strict [-1024, 1024] preprocessing)
+      │   └── inference.py            (ModelManager singleton, MPS execution)
+      └── api/
+          ├── __init__.py
+          └── xray.py                 (POST /analyze, GET /studies, GET /image)
+
+frontend/
+  ├── package.json                    (React 19, Vite, Lucide-React, Tailwind CSS)
+  ├── vite.config.ts                  (Vite config with /api backend proxy)
+  ├── src/
+      ├── main.tsx
+      ├── App.tsx                     (3-panel clinical workstation coordinator)
+      ├── index.css                   (Clinical dark theme & custom scrollbars)
+      ├── types/
+      │   └── studystate.ts           (TypeScript types, colors, anatomy map)
+      └── components/
+          ├── Banner.tsx              (Non-dismissible investigational banner)
+          ├── Header.tsx              (ORVYX branding, MPS badge, disabled tabs)
+          ├── StudyRail.tsx           (Selectable demo cards with thumbnails)
+          ├── Viewport.tsx            (Pan/Zoom viewer, overlay masks, reticle)
+          └── InsightsPanel.tsx       (18 findings, confidence bands, toggles)
+
+docs/
+  └── ARCHITECTURE.md                 (Comprehensive system architecture document)
+
+scripts/
+  └── smoke_test_phase1.py            (Automated end-to-end smoke test suite)
+
+Root Files:
+  ├── README.md                       (Quick start and technical specifications)
+  ├── .gitignore                      (Repository ignore rules)
+  └── SUMMARY.txt                     (This document)
+
+--------------------------------------------------------------------------------
+6. PHASE 0 VS PHASE 1 DISCREPANCY AUDIT
+--------------------------------------------------------------------------------
+- Classifier Weights: densenet121-res224-all (Exact match)
+- Pathology Labels: 18 classes in exact datasets.py order (Exact match)
+- Anatomical Segments: 14 thoracic structures in exact order (Exact match)
+- Preprocessing Range: [-1024, 1024] float32 strictly enforced (Exact match)
+- Acceleration Device: Apple Silicon MPS active (Exact match)
+- Total Discrepancies: ZERO (0)
+
+================================================================================

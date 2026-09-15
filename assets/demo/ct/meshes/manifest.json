@@ -1,0 +1,202 @@
+[
+  {
+    "id": "heart",
+    "label": "Heart",
+    "color": "#f43f5e",
+    "group": "Cardiovascular",
+    "volume_cm3": 484.12,
+    "voxel_centroid": [
+      283.2,
+      197.2,
+      63.0
+    ],
+    "physical_centroid": [
+      20.72,
+      -21.51,
+      -190.24
+    ],
+    "centered_centroid": [
+      20.72,
+      -44.81,
+      -16.24
+    ],
+    "vertex_count": 16324,
+    "face_count": 32656,
+    "mesh_url": "/api/ct/mesh/heart"
+  },
+  {
+    "id": "aorta",
+    "label": "Aorta",
+    "color": "#fb7185",
+    "group": "Cardiovascular",
+    "volume_cm3": 239.61,
+    "voxel_centroid": [
+      274.9,
+      256.2,
+      69.9
+    ],
+    "physical_centroid": [
+      14.41,
+      23.47,
+      -172.9
+    ],
+    "centered_centroid": [
+      14.41,
+      0.17,
+      1.1
+    ],
+    "vertex_count": 9372,
+    "face_count": 18686,
+    "mesh_url": "/api/ct/mesh/aorta"
+  },
+  {
+    "id": "trachea",
+    "label": "Trachea",
+    "color": "#38bdf8",
+    "group": "Airways",
+    "volume_cm3": 33.55,
+    "voxel_centroid": [
+      262.3,
+      235.6,
+      107.4
+    ],
+    "physical_centroid": [
+      4.81,
+      7.77,
+      -79.25
+    ],
+    "centered_centroid": [
+      4.81,
+      -15.53,
+      94.75
+    ],
+    "vertex_count": 2614,
+    "face_count": 5224,
+    "mesh_url": "/api/ct/mesh/trachea"
+  },
+  {
+    "id": "lung_upper_lobe_right",
+    "label": "Right Upper Lobe",
+    "color": "#0ea5e9",
+    "group": "Right Lung",
+    "volume_cm3": 1403.32,
+    "voxel_centroid": [
+      184.7,
+      227.8,
+      101.5
+    ],
+    "physical_centroid": [
+      -54.32,
+      1.8,
+      -94.0
+    ],
+    "centered_centroid": [
+      -54.32,
+      -21.5,
+      80.0
+    ],
+    "vertex_count": 26272,
+    "face_count": 52548,
+    "mesh_url": "/api/ct/mesh/lung_upper_lobe_right"
+  },
+  {
+    "id": "lung_middle_lobe_right",
+    "label": "Right Middle Lobe",
+    "color": "#06b6d4",
+    "group": "Right Lung",
+    "volume_cm3": 500.44,
+    "voxel_centroid": [
+      158.2,
+      187.3,
+      64.3
+    ],
+    "physical_centroid": [
+      -74.51,
+      -29.01,
+      -187.09
+    ],
+    "centered_centroid": [
+      -74.51,
+      -52.31,
+      -13.09
+    ],
+    "vertex_count": 14688,
+    "face_count": 29380,
+    "mesh_url": "/api/ct/mesh/lung_middle_lobe_right"
+  },
+  {
+    "id": "lung_lower_lobe_right",
+    "label": "Right Lower Lobe",
+    "color": "#14b8a6",
+    "group": "Right Lung",
+    "volume_cm3": 1315.89,
+    "voxel_centroid": [
+      171.3,
+      295.5,
+      63.4
+    ],
+    "physical_centroid": [
+      -64.5,
+      53.38,
+      -189.37
+    ],
+    "centered_centroid": [
+      -64.5,
+      30.08,
+      -15.37
+    ],
+    "vertex_count": 27017,
+    "face_count": 54066,
+    "mesh_url": "/api/ct/mesh/lung_lower_lobe_right"
+  },
+  {
+    "id": "lung_upper_lobe_left",
+    "label": "Left Upper Lobe",
+    "color": "#2dd4bf",
+    "group": "Left Lung",
+    "volume_cm3": 1455.05,
+    "voxel_centroid": [
+      351.5,
+      219.8,
+      94.3
+    ],
+    "physical_centroid": [
+      72.71,
+      -4.31,
+      -111.99
+    ],
+    "centered_centroid": [
+      72.71,
+      -27.61,
+      62.01
+    ],
+    "vertex_count": 28134,
+    "face_count": 56288,
+    "mesh_url": "/api/ct/mesh/lung_upper_lobe_left"
+  },
+  {
+    "id": "lung_lower_lobe_left",
+    "label": "Left Lower Lobe",
+    "color": "#10b981",
+    "group": "Left Lung",
+    "volume_cm3": 1662.67,
+    "voxel_centroid": [
+      368.4,
+      293.7,
+      60.0
+    ],
+    "physical_centroid": [
+      85.64,
+      52.04,
+      -197.78
+    ],
+    "centered_centroid": [
+      85.64,
+      28.74,
+      -23.78
+    ],
+    "vertex_count": 30098,
+    "face_count": 60220,
+    "mesh_url": "/api/ct/mesh/lung_lower_lobe_left"
+  }
+]
