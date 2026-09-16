@@ -12,6 +12,7 @@ build/
 
 # Node
 node_modules/
+node_modules
 frontend/dist/
 frontend/.vite/
 npm-debug.log*
