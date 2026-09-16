@@ -122,7 +122,7 @@ function randomCloud(count: number, spread: number): Float32Array {
   const out = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     out[i * 3]     = (Math.random() - 0.5) * spread;
-    out[i * 3 + 1] = (Math.random() - 0.5) * spread * 0.9 + 5;
+    out[i * 3 + 1] = (Math.random() - 0.5) * spread * 0.8 + 0.5;
     out[i * 3 + 2] = (Math.random() - 0.5) * spread * 0.6;
   }
   return out;
@@ -215,31 +215,31 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
     (gridHelper.material as THREE.Material).transparent = true;
     scene.add(gridHelper);
 
-    // Camera (front three-quarter anatomical perspective)
-    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 500);
-    camera.position.set(12, 10, 48);
-    camera.lookAt(0, 3.5, 0);
+    // Camera (centered frontal anatomical perspective matching clinical reference)
+    const camera = new THREE.PerspectiveCamera(44, width / height, 0.1, 500);
+    camera.position.set(3, 3, 34);
+    camera.lookAt(0, 1.2, 0);
     cameraRef.current = camera;
 
     // Studio lights for anatomical meshes: Warm key, cool fill, back rim light
-    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const dir1 = new THREE.DirectionalLight(0xfff5ea, 1.4);
-    dir1.position.set(25, 30, 35);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.90));
+    const dir1 = new THREE.DirectionalLight(0xfff8ee, 1.5);
+    dir1.position.set(18, 22, 28);
     scene.add(dir1);
-    const dir2 = new THREE.DirectionalLight(0x93c5fd, 0.75);
-    dir2.position.set(-25, -15, 20);
+    const dir2 = new THREE.DirectionalLight(0xcfd8e3, 0.7);
+    dir2.position.set(-18, -10, 20);
     scene.add(dir2);
-    const dir3 = new THREE.DirectionalLight(0x38bdf8, 0.65);
-    dir3.position.set(0, 25, -35);
+    const dir3 = new THREE.DirectionalLight(0x7dd3fc, 0.5);
+    dir3.position.set(0, 15, -30);
     scene.add(dir3);
 
     // OrbitControls (disabled during animation)
     const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
-    controls.minDistance   = 20;
+    controls.minDistance   = 15;
     controls.maxDistance   = 100;
-    controls.target.set(0, 3.5, 0);
+    controls.target.set(0, 1.2, 0);
     controls.enabled = false;
     controlsRef.current = controls;
 
@@ -449,33 +449,33 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
       let depthWrite = true;
 
       if (isSkeletal) {
-        color = '#f2ede4'; // warm ivory bone matching Reference B
-        roughness = 0.44;
-        metalness = 0.08;
+        color = '#ece5d8'; // warm ivory bone matching Picture 2 clinical reference
+        roughness = 0.40;
+        metalness = 0.06;
         opacity = 1.0;
         transparent = false;
         depthWrite = true;
       } else if (isLung) {
-        color = '#38bdf8'; // soft translucent cyan
+        color = '#38bdf8'; // subtle soft translucent cyan
         roughness = 0.28;
         metalness = 0.08;
-        opacity = 0.28;
+        opacity = 0.08;
         transparent = true;
-        depthWrite = false; // allows seeing heart and spine through the lung volume
+        depthWrite = false; // allows seeing rib cage, heart, and spine clearly
       } else if (isHeart) {
-        color = '#e11d48'; // cardiovascular crimson
+        color = '#e11d48'; // cardiovascular crimson nestled in cardiac notch
         roughness = 0.38;
         metalness = 0.12;
-        opacity = 0.72;
+        opacity = 0.22;
         transparent = true;
-        depthWrite = true;
+        depthWrite = false;
       } else if (isTrachea) {
         color = '#67e8f9'; // airway cyan
         roughness = 0.32;
         metalness = 0.06;
-        opacity = 0.65;
+        opacity = 0.35;
         transparent = true;
-        depthWrite = true;
+        depthWrite = false;
       }
 
       if (isHighlighted) {

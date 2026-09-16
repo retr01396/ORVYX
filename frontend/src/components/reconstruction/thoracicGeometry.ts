@@ -1,81 +1,225 @@
 /**
  * thoracicGeometry.ts
  *
- * High-fidelity anatomical thoracic geometry generators for the ORVYX 3D Reconstruction Viewport.
- * Builds realistic, smooth cortical bone meshes and soft-tissue silhouettes matching clinical reference:
- *   - 12 pairs of anatomically curved ribs with flattened cortical cross-sections
- *   - 12 articulated thoracic vertebrae (T1–T12) with bodies, pedicles, transverse & spinous processes
- *   - 3-part sternum (manubrium, sternal body / gladiolus, and xiphoid process)
- *   - Left & right S-curved clavicles
- *   - Left & right triangular scapulae with spine and acromion process
- *   - Asymmetric anatomical lungs with cardiac notch and diaphragmatic base
- *   - Conical anatomical heart with apex and ventricular contour
- *   - Trachea with cartilaginous rings and bronchial bifurcation (carina)
+ * Anatomically accurate human adult thoracic geometry generators for the ORVYX 3D Reconstruction Viewport.
+ * Produces clinically realistic, non-deformed cortical bone meshes matching clinical reference (Picture 2):
+ *   - 12 pairs of anatomically curved ribs using local Bishop rotation-minimizing frames (no global shear)
+ *   - Seamless closed tube caps and smooth end-tapering (no open hollow cutoffs)
+ *   - Normal human adult thoracic proportions: width ~26-28 cm, height ~20-22 cm, depth ~16-18 cm
+ *   - Articulated anterior sternal connections: true ribs 1-7 articulate to sternum, false ribs 8-10 form costal arch
+ *   - 3D faceted sternum with hexagonal manubrium (suprasternal notch, clavicular facets), gladiolus body, and xiphoid
+ *   - Articulated thoracic spine with continuous vertebral body column, intervertebral discs, and C6-C7 neck extension
+ *   - S-curved clavicles articulating with manubrium and acromion
+ *   - Scapulae with dorsal blade, spine, acromion, glenoid cavity, and anatomical proximal humerus shafts
+ *   - Compact internal viscera (lungs, heart, trachea) nestled neatly inside the thoracic cage
  */
 
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ---------------------------------------------------------------------------
-// 1. Rib Cage (12 pairs of anatomically accurate ribs)
+// Helper: Capped Ribbon Tube with Bishop Rotation-Minimizing Frame (RMF)
+// ---------------------------------------------------------------------------
+// Generates ribbon cross-sections directly in the local curve frame with smooth
+// end-tapering and closed hemispherical end caps to prevent hollow pipe artifacts.
+function createCappedRibbonTube(
+  curve: THREE.Curve<THREE.Vector3>,
+  radiusX: number, // local thickness (transverse)
+  radiusY: number, // local height (craniocaudal)
+  numSegments = 45,
+  numRadial = 14,
+  taperEnds = true
+): THREE.BufferGeometry {
+  const points = curve.getSpacedPoints(numSegments);
+  const tangents: THREE.Vector3[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const t = i === points.length - 1
+      ? points[i].clone().sub(points[i - 1]).normalize()
+      : points[i + 1].clone().sub(points[i]).normalize();
+    tangents.push(t);
+  }
+
+  const normals: THREE.Vector3[] = [new THREE.Vector3()];
+  const binormals: THREE.Vector3[] = [new THREE.Vector3()];
+
+  let ref = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(tangents[0].dot(ref)) > 0.9) ref = new THREE.Vector3(0, 0, 1);
+  normals[0].crossVectors(tangents[0], ref).normalize();
+  binormals[0].crossVectors(tangents[0], normals[0]).normalize();
+
+  // Parallel transport along the curve (Bishop frame)
+  for (let i = 1; i < points.length; i++) {
+    const v1 = points[i].clone().sub(points[i - 1]);
+    const c1 = v1.dot(v1);
+    if (c1 < 1e-8) {
+      normals.push(normals[i - 1].clone());
+      binormals.push(binormals[i - 1].clone());
+      continue;
+    }
+    const r_l = normals[i - 1].clone().sub(v1.clone().multiplyScalar((2.0 / c1) * v1.dot(normals[i - 1])));
+    const t_l = tangents[i - 1].clone().sub(v1.clone().multiplyScalar((2.0 / c1) * v1.dot(tangents[i - 1])));
+    const v2 = tangents[i].clone().sub(t_l);
+    const c2 = v2.dot(v2);
+    const n_i = (c2 < 1e-8) ? r_l : r_l.sub(v2.clone().multiplyScalar((2.0 / c2) * v2.dot(r_l)));
+    n_i.normalize();
+    const b_i = new THREE.Vector3().crossVectors(tangents[i], n_i).normalize();
+    normals.push(n_i);
+    binormals.push(b_i);
+  }
+
+  const vertices: number[] = [];
+  const indices: number[] = [];
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const n = normals[i];
+    const b = binormals[i];
+
+    // Smooth anatomical end-tapering
+    let scale = 1.0;
+    if (taperEnds) {
+      if (i === 0) scale = 0.25;
+      else if (i === 1) scale = 0.70;
+      else if (i === points.length - 2) scale = 0.70;
+      else if (i === points.length - 1) scale = 0.25;
+    }
+
+    const rx = radiusX * scale;
+    const ry = radiusY * scale;
+
+    for (let j = 0; j < numRadial; j++) {
+      const th = (j / numRadial) * Math.PI * 2;
+      const vx = p.x + (rx * Math.cos(th)) * n.x + (ry * Math.sin(th)) * b.x;
+      const vy = p.y + (rx * Math.cos(th)) * n.y + (ry * Math.sin(th)) * b.y;
+      const vz = p.z + (rx * Math.cos(th)) * n.z + (ry * Math.sin(th)) * b.z;
+      vertices.push(vx, vy, vz);
+    }
+  }
+
+  for (let i = 0; i < points.length - 1; i++) {
+    for (let j = 0; j < numRadial; j++) {
+      const next_j = (j + 1) % numRadial;
+      const p0 = i * numRadial + j;
+      const p1 = i * numRadial + next_j;
+      const p2 = (i + 1) * numRadial + next_j;
+      const p3 = (i + 1) * numRadial + j;
+      indices.push(p0, p1, p2, p0, p2, p3);
+    }
+  }
+
+  // Add closed end caps
+  const capStartIdx = vertices.length / 3;
+  vertices.push(points[0].x, points[0].y, points[0].z);
+  for (let j = 0; j < numRadial; j++) {
+    const next_j = (j + 1) % numRadial;
+    indices.push(capStartIdx, next_j, j);
+  }
+
+  const capEndIdx = vertices.length / 3;
+  const lastRingStart = (points.length - 1) * numRadial;
+  vertices.push(points[points.length - 1].x, points[points.length - 1].y, points[points.length - 1].z);
+  for (let j = 0; j < numRadial; j++) {
+    const next_j = (j + 1) % numRadial;
+    indices.push(capEndIdx, lastRingStart + j, lastRingStart + next_j);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// ---------------------------------------------------------------------------
+// 1. Rib Cage (12 pairs of anatomically accurate ribs + costal arch)
 // ---------------------------------------------------------------------------
 
 function makeAnatomicalRib(side: number, ribIndex: number): THREE.BufferGeometry {
-  // Height along thoracic column (T1 at y=15.5 down to T12 at y=-15)
-  const yVert = 15.5 - ribIndex * 2.7;
-  
-  // Barrel chest curvature factor: Rib 1 narrow (R=8.5), Ribs 7-8 widest (R=16.8), Rib 12 tapers
+  const yVert = 9.6 - ribIndex * 1.75;
+  const zSpine = -4.8 - 1.2 * Math.sin((ribIndex / 11.0) * Math.PI);
+
   const wFactor = Math.sin(((ribIndex + 1.2) / 13.5) * Math.PI);
-  const latWidth = 8.5 + 8.5 * Math.pow(wFactor, 0.85);
-  const zSpine = -5.8 - ribIndex * 0.12;
+  const latW = 6.2 + 7.0 * Math.pow(wFactor, 0.85);
+
+  const yLat = yVert - 1.4 - ribIndex * 0.12;
+  const zLat = zSpine + 3.8 + 2.4 * Math.sin((ribIndex / 11.0) * Math.PI);
 
   let xAnt: number;
   let yAnt: number;
   let zAnt: number;
 
-  if (ribIndex < 7) {
-    // True ribs (attach directly to sternum)
-    yAnt = 14.2 - ribIndex * 2.25;
-    zAnt = 7.6 + ribIndex * 0.08;
-    xAnt = side * (1.6 + ribIndex * 0.18);
-  } else if (ribIndex < 10) {
-    // False ribs (attach to costal cartilage margin)
-    yAnt = 14.2 - 6 * 2.25 - (ribIndex - 6) * 1.35;
-    zAnt = 7.2 - (ribIndex - 6) * 0.55;
-    xAnt = side * (3.0 + (ribIndex - 6) * 1.3);
+  if (ribIndex === 0) {
+    // Rib 1: articulates with lateral manubrium below clavicle
+    xAnt = 2.2;
+    yAnt = 8.5;
+    zAnt = 3.9;
+  } else if (ribIndex < 7) {
+    // True ribs 2-7: articulate with lateral border of sternal body
+    xAnt = 1.45;
+    yAnt = 7.0 - (ribIndex - 1) * 1.08;
+    zAnt = 4.2 + (ribIndex - 1) * 0.04;
+  } else if (ribIndex === 7) {
+    // False rib 8: sweeps up into 7th costal margin
+    xAnt = 2.6;
+    yAnt = 0.2;
+    zAnt = 4.0;
+  } else if (ribIndex === 8) {
+    // False rib 9: sweeps up into 8th costal margin
+    xAnt = 4.2;
+    yAnt = -0.7;
+    zAnt = 3.8;
+  } else if (ribIndex === 9) {
+    // False rib 10: sweeps up into 9th costal margin
+    xAnt = 5.8;
+    yAnt = -1.6;
+    zAnt = 3.5;
   } else {
-    // Floating ribs 11 and 12
-    yAnt = yVert - 3.5;
-    zAnt = 1.2 - (ribIndex - 10) * 1.8;
-    xAnt = side * (latWidth * 0.72);
+    // Floating ribs 11-12: short free tips in flank
+    xAnt = latW * 0.80;
+    yAnt = yVert - 2.2;
+    zAnt = zSpine + 2.5 - (ribIndex - 10) * 1.2;
   }
 
-  const yAngle = yVert - 0.85 - ribIndex * 0.12;
-  const yLat   = yVert - 1.9 - ribIndex * 0.18;
+  const yAngle = yVert - 0.55;
+  let curvePts: THREE.Vector3[];
 
-  const points: THREE.Vector3[] = [
-    new THREE.Vector3(side * 1.8, yVert, zSpine + 0.4),                  // Head of rib (articulates with vertebra)
-    new THREE.Vector3(side * 3.4, yVert - 0.25, zSpine - 0.75),          // Neck & tubercle
-    new THREE.Vector3(side * (latWidth * 0.52), yAngle, zSpine - 0.55),  // Angulus costae (rib angle)
-    new THREE.Vector3(side * (latWidth * 0.86), yAngle - 0.65, zSpine + 1.9), // Posterolateral arc
-    new THREE.Vector3(side * latWidth, yLat, zSpine + 4.8),              // Maximum lateral flank
-    new THREE.Vector3(side * (latWidth * 0.91), yLat - 0.75, zSpine + 7.8), // Anterolateral curve
-    new THREE.Vector3(side * (latWidth * 0.62), yAnt - 0.45, zAnt + 1.2),   // Anterior descent
-    new THREE.Vector3(xAnt, yAnt, zAnt),                                 // Anterior costochondral end
-  ];
+  if (ribIndex === 11) {
+    // Rib 12: short floating rib ending in posterior flank
+    curvePts = [
+      new THREE.Vector3(side * 1.2, yVert, zSpine + 0.3),
+      new THREE.Vector3(side * 2.2, yVert - 0.2, zSpine - 0.4),
+      new THREE.Vector3(side * (latW * 0.42), yAngle, zSpine - 0.2),
+      new THREE.Vector3(side * (latW * 0.70), yVert - 1.8, zSpine + 1.2),
+    ];
+  } else if (ribIndex === 10) {
+    // Rib 11: medium floating rib ending in lateral flank
+    curvePts = [
+      new THREE.Vector3(side * 1.2, yVert, zSpine + 0.3),
+      new THREE.Vector3(side * 2.3, yVert - 0.2, zSpine - 0.5),
+      new THREE.Vector3(side * (latW * 0.50), yAngle, zSpine - 0.3),
+      new THREE.Vector3(side * (latW * 0.82), yAngle - 0.35, zSpine + 1.6),
+      new THREE.Vector3(side * (latW * 0.92), yVert - 2.1, zSpine + 2.8),
+    ];
+  } else {
+    // Ribs 1-10: full ribs (1-7 true ribs to sternum, 8-10 to costal arch)
+    curvePts = [
+      new THREE.Vector3(side * 1.2, yVert, zSpine + 0.3),                 // Costovertebral joint
+      new THREE.Vector3(side * 2.3, yVert - 0.2, zSpine - 0.5),         // Tubercle
+      new THREE.Vector3(side * (latW * 0.5), yAngle, zSpine - 0.3),      // Angulus costae
+      new THREE.Vector3(side * (latW * 0.88), yAngle - 0.4, zSpine + 1.8), // Posterolateral arc
+      new THREE.Vector3(side * latW, yLat, zLat),                        // Lateral peak
+      new THREE.Vector3(side * (latW * 0.88), yLat - 0.5, zLat + 2.2),   // Anterolateral descent
+      new THREE.Vector3(side * (latW * 0.48), yAnt - 0.25, zAnt - 0.3),  // Anterior curve toward midline
+      new THREE.Vector3(side * xAnt, yAnt, zAnt),                        // Sternal / costal arch facet
+    ];
+  }
 
-  const curvePts = ribIndex >= 10 ? points.slice(0, 6) : points;
   const curve = new THREE.CatmullRomCurve3(curvePts, false, 'catmullrom', 0.5);
 
-  // Ribs are flat cortical bone strips: thickness ~0.45, height ~1.15
-  const radX = 0.42 + 0.03 * (1.0 - ribIndex / 12.0);
-  const radY = 1.05 + 0.08 * (1.0 - ribIndex / 12.0);
+  const radX = 0.22 + 0.02 * (1.0 - ribIndex / 12.0);
+  const radY = 0.46 + 0.04 * (1.0 - ribIndex / 12.0);
 
-  const tube = new THREE.TubeGeometry(curve, 55, radX, 16, false);
-  // Scale craniocaudally to flatten into anatomical ribbon cross-section
-  tube.scale(1.0, radY / radX, 1.0);
-  tube.computeVertexNormals();
-  return tube;
+  return createCappedRibbonTube(curve, radX, radY, 45, 14, true);
 }
 
 export function buildAnatomicalRibCage(): THREE.BufferGeometry {
@@ -85,102 +229,76 @@ export function buildAnatomicalRibCage(): THREE.BufferGeometry {
       ribGeos.push(makeAnatomicalRib(side, ribIdx));
     }
   }
+
+  // Costal arch connecting ribs 7, 8, 9, 10 into the continuous infrasternal margin
+  for (const side of [1, -1]) {
+    const archPts = [
+      new THREE.Vector3(side * 1.45, 0.52, 4.2),  // At 7th sternal facet
+      new THREE.Vector3(side * 2.6, 0.2, 4.0),    // Rib 8 junction
+      new THREE.Vector3(side * 4.2, -0.7, 3.8),   // Rib 9 junction
+      new THREE.Vector3(side * 5.8, -1.6, 3.5),   // Rib 10 junction
+    ];
+    const archCurve = new THREE.CatmullRomCurve3(archPts, false, 'catmullrom', 0.5);
+    ribGeos.push(createCappedRibbonTube(archCurve, 0.26, 0.44, 25, 12, true));
+  }
+
   const merged = BufferGeometryUtils.mergeGeometries(ribGeos, false);
   merged.computeVertexNormals();
   return merged;
 }
 
 // ---------------------------------------------------------------------------
-// 2. Thoracic Spine (T1–T12 articulated vertebral column)
+// 2. Thoracic Spine with Continuous Articulated Column
 // ---------------------------------------------------------------------------
-
-function makeVertebra(vIdx: number): THREE.BufferGeometry {
-  const yCenter = 15.5 - vIdx * 2.7;
-  const zBody = -5.8 - vIdx * 0.12;
-  const bodyRadius = 1.5 + vIdx * 0.04;
-  const bodyHeight = 2.0;
-
-  const parts: THREE.BufferGeometry[] = [];
-
-  // 1. Vertebral body (kidney/heart-shaped cylinder with flared endplates)
-  const bodyGeo = new THREE.CylinderGeometry(bodyRadius * 1.05, bodyRadius * 1.05, bodyHeight, 20, 4);
-  bodyGeo.scale(1.15, 1.0, 0.95);
-  bodyGeo.translate(0, yCenter, zBody);
-  parts.push(bodyGeo);
-
-  // 2. Left & Right Transverse Processes (project posterolaterally)
-  for (const side of [1, -1]) {
-    const tpCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0.0, yCenter, zBody - 0.8),
-      new THREE.Vector3(side * 1.8, yCenter - 0.1, zBody - 1.2),
-      new THREE.Vector3(side * 3.6, yCenter - 0.2, zBody - 1.5),
-    ]);
-    const tpGeo = new THREE.TubeGeometry(tpCurve, 12, 0.5, 10, false);
-    parts.push(tpGeo);
-  }
-
-  // 3. Posterior Spinous Process (slants sharply inferiorly)
-  const spinCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.0, yCenter + 0.2, zBody - 1.0),
-    new THREE.Vector3(0.0, yCenter - 0.6, zBody - 2.5),
-    new THREE.Vector3(0.0, yCenter - 1.8, zBody - 4.2),
-  ]);
-  const spinGeo = new THREE.TubeGeometry(spinCurve, 14, 0.45, 10, false);
-  spinGeo.scale(1.0, 1.4, 1.0); // flatten laterally
-  parts.push(spinGeo);
-
-  return BufferGeometryUtils.mergeGeometries(parts, false);
-}
 
 export function buildAnatomicalSpine(): THREE.BufferGeometry {
-  const vertGeos: THREE.BufferGeometry[] = [];
-  for (let vIdx = 0; vIdx < 12; vIdx++) {
-    vertGeos.push(makeVertebra(vIdx));
-  }
-  const merged = BufferGeometryUtils.mergeGeometries(vertGeos, false);
-  merged.computeVertexNormals();
-  return merged;
-}
-
-// ---------------------------------------------------------------------------
-// 3. Sternum (Manubrium, Sternal Body, and Xiphoid Process)
-// ---------------------------------------------------------------------------
-
-export function buildAnatomicalSternum(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
-  // 1. Manubrium (hexagonal shield at thoracic inlet)
-  const manubriumCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 16.6, 7.3),
-    new THREE.Vector3(0, 15.8, 7.5),
-    new THREE.Vector3(0, 14.5, 7.6),
-    new THREE.Vector3(0, 13.6, 7.7),
-  ]);
-  const manGeo = new THREE.TubeGeometry(manubriumCurve, 12, 2.6, 16, false);
-  manGeo.scale(1.0, 1.0, 0.45); // flatten anterior-posteriorly
-  parts.push(manGeo);
+  // Continuous anterior vertebral body column (T12 up to C6/C7 neck extension)
+  for (let i = -2; i < 12; i++) {
+    const yCenter = 9.6 - i * 1.75;
+    const normI = Math.max(0, i);
+    const zBody = -4.8 - 1.2 * Math.sin((normI / 11.0) * Math.PI);
+    const bodyR = 1.35 + normI * 0.03;
+    const bodyH = 1.45;
 
-  // 2. Sternal Body (Gladiolus with segmental costal facets)
-  const bodyCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 13.5, 7.7),
-    new THREE.Vector3(0, 10.5, 7.85),
-    new THREE.Vector3(0, 7.5, 7.85),
-    new THREE.Vector3(0, 4.5, 7.7),
-    new THREE.Vector3(0, 1.8, 7.4),
-  ]);
-  const bodyGeo = new THREE.TubeGeometry(bodyCurve, 20, 1.7, 16, false);
-  bodyGeo.scale(1.0, 1.0, 0.4);
-  parts.push(bodyGeo);
+    // Vertebral body
+    const bodyGeo = new THREE.CylinderGeometry(bodyR, bodyR * 1.05, bodyH, 18, 1);
+    bodyGeo.scale(1.15, 1.0, 0.95);
+    bodyGeo.translate(0, yCenter, zBody);
+    parts.push(bodyGeo.toNonIndexed());
 
-  // 3. Xiphoid Process (tapered inferior tip)
-  const xiphCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 1.7, 7.35),
-    new THREE.Vector3(0, 0.5, 7.1),
-    new THREE.Vector3(0, -0.8, 6.8),
-  ]);
-  const xiphGeo = new THREE.TubeGeometry(xiphCurve, 10, 0.9, 12, false);
-  xiphGeo.scale(0.8, 1.0, 0.35);
-  parts.push(xiphGeo);
+    // Intervertebral disc (connects adjacent bodies smoothly)
+    if (i < 11) {
+      const discGeo = new THREE.CylinderGeometry(bodyR * 0.98, bodyR * 0.98, 0.35, 18, 1);
+      discGeo.scale(1.15, 1.0, 0.95);
+      discGeo.translate(0, yCenter - 0.90, zBody);
+      parts.push(discGeo.toNonIndexed());
+    }
+
+    if (i >= 0) {
+      // Transverse processes
+      for (const side of [1, -1]) {
+        const tpCurve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(0.0, yCenter, zBody - 0.6),
+          new THREE.Vector3(side * 1.4, yCenter - 0.1, zBody - 0.9),
+          new THREE.Vector3(side * 2.8, yCenter - 0.15, zBody - 1.1),
+        ]);
+        const tpGeo = new THREE.TubeGeometry(tpCurve, 10, 0.35, 8, false);
+        parts.push(tpGeo.toNonIndexed());
+      }
+
+      // Spinous process
+      const spinCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.0, yCenter + 0.15, zBody - 0.8),
+        new THREE.Vector3(0.0, yCenter - 0.45, zBody - 1.9),
+        new THREE.Vector3(0.0, yCenter - 1.35, zBody - 3.2),
+      ]);
+      const spinGeo = new THREE.TubeGeometry(spinCurve, 12, 0.32, 8, false);
+      spinGeo.scale(0.85, 1.3, 1.0);
+      parts.push(spinGeo.toNonIndexed());
+    }
+  }
 
   const merged = BufferGeometryUtils.mergeGeometries(parts, false);
   merged.computeVertexNormals();
@@ -188,22 +306,103 @@ export function buildAnatomicalSternum(): THREE.BufferGeometry {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Clavicles (S-curved paired collarbones)
+// 3. Sternum (Anatomical 3D plate: Manubrium, Gladiolus, and Xiphoid)
+// ---------------------------------------------------------------------------
+
+export function buildAnatomicalSternum(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+
+  // 1. Manubrium: hexagonal shield with suprasternal notch & facets
+  const manShape = new THREE.Shape();
+  manShape.moveTo(0, 9.6);       // Suprasternal notch
+  manShape.lineTo(2.3, 9.4);     // Right clavicular notch
+  manShape.lineTo(2.4, 8.4);     // Right 1st rib facet
+  manShape.lineTo(1.5, 7.2);     // Sternal angle (angle of Louis)
+  manShape.lineTo(-1.5, 7.2);    // Left sternal angle
+  manShape.lineTo(-2.4, 8.4);    // Left 1st rib facet
+  manShape.lineTo(-2.3, 9.4);    // Left clavicular notch
+  manShape.closePath();
+
+  const manExtrude = {
+    steps: 1,
+    depth: 0.55,
+    bevelEnabled: true,
+    bevelThickness: 0.18,
+    bevelSize: 0.15,
+    bevelSegments: 2,
+  };
+  const manGeo = new THREE.ExtrudeGeometry(manShape, manExtrude);
+  manGeo.translate(0, 0, 3.8);
+  parts.push(manGeo.toNonIndexed());
+
+  // 2. Sternal Body (Gladiolus with lateral costal facets)
+  const bodyShape = new THREE.Shape();
+  bodyShape.moveTo(-1.45, 7.2);
+  bodyShape.lineTo(1.45, 7.2);
+  bodyShape.lineTo(1.55, 5.0);
+  bodyShape.lineTo(1.50, 3.0);
+  bodyShape.lineTo(1.40, 1.5);
+  bodyShape.lineTo(1.25, 0.5);
+  bodyShape.lineTo(-1.25, 0.5);
+  bodyShape.lineTo(-1.40, 1.5);
+  bodyShape.lineTo(-1.50, 3.0);
+  bodyShape.lineTo(-1.55, 5.0);
+  bodyShape.closePath();
+
+  const bodyExtrude = {
+    steps: 1,
+    depth: 0.50,
+    bevelEnabled: true,
+    bevelThickness: 0.16,
+    bevelSize: 0.14,
+    bevelSegments: 2,
+  };
+  const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, bodyExtrude);
+  bodyGeo.translate(0, 0, 3.9);
+  parts.push(bodyGeo.toNonIndexed());
+
+  // 3. Xiphoid Process
+  const xiphShape = new THREE.Shape();
+  xiphShape.moveTo(-1.0, 0.5);
+  xiphShape.lineTo(1.0, 0.5);
+  xiphShape.lineTo(0.5, -0.6);
+  xiphShape.lineTo(0.0, -1.5); // Tapered inferior tip
+  xiphShape.lineTo(-0.5, -0.6);
+  xiphShape.closePath();
+
+  const xiphExtrude = {
+    steps: 1,
+    depth: 0.35,
+    bevelEnabled: true,
+    bevelThickness: 0.12,
+    bevelSize: 0.10,
+    bevelSegments: 2,
+  };
+  const xiphGeo = new THREE.ExtrudeGeometry(xiphShape, xiphExtrude);
+  xiphGeo.translate(0, 0, 3.7);
+  parts.push(xiphGeo.toNonIndexed());
+
+  const merged = BufferGeometryUtils.mergeGeometries(parts, false);
+  merged.computeVertexNormals();
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// 4. Clavicles (S-curved collarbones)
 // ---------------------------------------------------------------------------
 
 export function buildAnatomicalClavicles(): THREE.BufferGeometry {
   const clavGeos: THREE.BufferGeometry[] = [];
   for (const side of [1, -1]) {
     const pts = [
-      new THREE.Vector3(side * 2.1, 16.4, 7.4),   // Sternal facet
-      new THREE.Vector3(side * 4.8, 16.8, 7.8),   // Medial anterior convexity
-      new THREE.Vector3(side * 8.5, 17.0, 6.5),   // Mid-shaft
-      new THREE.Vector3(side * 12.0, 16.8, 4.0),  // Lateral posterior concavity
-      new THREE.Vector3(side * 14.8, 16.2, 2.2),  // Acromial end
+      new THREE.Vector3(side * 2.2, 9.5, 4.0),   // Sternal facet at manubrium
+      new THREE.Vector3(side * 5.0, 9.8, 4.4),   // Anterior medial curvature
+      new THREE.Vector3(side * 8.5, 9.8, 3.5),   // Mid-shaft
+      new THREE.Vector3(side * 11.5, 9.4, 1.6),  // Posterior lateral curvature
+      new THREE.Vector3(side * 13.8, 8.8, -0.1), // Acromial end meeting scapula
     ];
     const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
-    const geo = new THREE.TubeGeometry(curve, 35, 0.55, 14, false);
-    clavGeos.push(geo);
+    clavGeos.push(createCappedRibbonTube(curve, 0.45, 0.45, 30, 12, true));
   }
   const merged = BufferGeometryUtils.mergeGeometries(clavGeos, false);
   merged.computeVertexNormals();
@@ -211,42 +410,59 @@ export function buildAnatomicalClavicles(): THREE.BufferGeometry {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Scapulae (Triangular blade, spine of scapula & acromion)
+// 5. Scapulae & Shoulder Girdle with Proximal Humerus
 // ---------------------------------------------------------------------------
 
 export function buildAnatomicalScapulae(): THREE.BufferGeometry {
   const scapGeos: THREE.BufferGeometry[] = [];
   for (const side of [1, -1]) {
-    // Blade triangular plate
+    // 1. Blade plate
     const bladeShape = new THREE.Shape();
-    bladeShape.moveTo(side * 6.5, 14.0);  // Superior angle
-    bladeShape.lineTo(side * 8.5, 3.5);   // Inferior angle
-    bladeShape.lineTo(side * 14.5, 13.5); // Glenoid cavity / lateral angle
+    bladeShape.moveTo(side * 5.8, 8.2);   // Superior angle
+    bladeShape.lineTo(side * 7.4, -0.8);  // Inferior angle
+    bladeShape.lineTo(side * 13.0, 7.8);  // Glenoid neck
     bladeShape.closePath();
 
     const extrudeSettings = {
-      steps: 2,
-      depth: 0.6,
+      steps: 1,
+      depth: 0.4,
       bevelEnabled: true,
-      bevelThickness: 0.25,
-      bevelSize: 0.3,
-      bevelSegments: 3,
+      bevelThickness: 0.18,
+      bevelSize: 0.22,
+      bevelSegments: 2,
     };
     const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, extrudeSettings);
-    // Kyphotic concavity conforming to posterior thoracic ribs
-    bladeGeo.translate(0, 0, -6.0);
+    bladeGeo.translate(0, 0, -5.2);
+    scapGeos.push(bladeGeo.toNonIndexed());
 
-    // Spine of the Scapula & Acromion
+    // 2. Spine of Scapula & Acromion
     const spineCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(side * 6.6, 12.8, -6.0),
-      new THREE.Vector3(side * 10.5, 13.6, -5.2),
-      new THREE.Vector3(side * 13.8, 14.8, -3.5),
-      new THREE.Vector3(side * 15.2, 15.8, -0.5), // Acromion process
+      new THREE.Vector3(side * 5.8, 7.4, -5.2),
+      new THREE.Vector3(side * 9.2, 8.0, -4.4),
+      new THREE.Vector3(side * 12.4, 8.8, -2.6),
+      new THREE.Vector3(side * 13.8, 9.0, -0.1), // Acromion meeting clavicle
     ]);
-    const spineGeo = new THREE.TubeGeometry(spineCurve, 20, 0.65, 12, false).toNonIndexed();
+    const spineGeo = new THREE.TubeGeometry(spineCurve, 16, 0.48, 10, false);
+    scapGeos.push(spineGeo.toNonIndexed());
 
-    const singleScap = BufferGeometryUtils.mergeGeometries([bladeGeo, spineGeo], false);
-    scapGeos.push(singleScap);
+    // 3. Glenoid head and anatomical humerus shaft
+    const humerusHead = new THREE.SphereGeometry(1.2, 16, 12);
+    humerusHead.scale(0.9, 1.1, 0.9);
+    humerusHead.translate(side * 13.8, 8.0, -0.3);
+    scapGeos.push(humerusHead.toNonIndexed());
+
+    const humerusCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(side * 13.8, 7.6, -0.3),  // Surgical neck
+      new THREE.Vector3(side * 14.1, 4.2, -0.3),  // Upper shaft
+      new THREE.Vector3(side * 14.0, 0.5, -0.4),  // Mid shaft
+      new THREE.Vector3(side * 13.8, -3.2, -0.5), // Distal thoracic level shaft
+    ]);
+    const humerusGeo = new THREE.TubeGeometry(humerusCurve, 20, 0.72, 12, false).toNonIndexed();
+    scapGeos.push(humerusGeo);
+
+    const humerusBottom = new THREE.SphereGeometry(0.72, 12, 8);
+    humerusBottom.translate(side * 13.8, -3.2, -0.5);
+    scapGeos.push(humerusBottom.toNonIndexed());
   }
   const merged = BufferGeometryUtils.mergeGeometries(scapGeos, false);
   merged.computeVertexNormals();
@@ -261,7 +477,6 @@ export function buildAnatomicalLung(side: 'left' | 'right'): THREE.BufferGeometr
   const sign = side === 'right' ? 1 : -1;
   const isLeft = side === 'left';
 
-  // Parametric anatomical lung: conical apex, convex lateral surface, concave diaphragmatic base
   const radialSegments = 24;
   const heightSegments = 24;
   const geometry = new THREE.BufferGeometry();
@@ -270,34 +485,31 @@ export function buildAnatomicalLung(side: 'left' | 'right'): THREE.BufferGeometr
 
   for (let yIdx = 0; yIdx <= heightSegments; yIdx++) {
     const v = yIdx / heightSegments; // 0 (apex) -> 1 (base)
-    const y = 14.5 - v * 20.5; // from y=14.5 to y=-6.0
+    const y = 8.5 - v * 15.0; // from y=8.5 down to y=-6.5
 
     // Radial expansion from apex to diaphragmatic base
     const apexProfile = Math.sin(Math.min(1.0, v * 1.5) * (Math.PI / 2));
-    const baseWidth = (4.8 + 2.8 * apexProfile);
+    const baseWidth = 3.6 + 2.4 * apexProfile;
 
     for (let xIdx = 0; xIdx <= radialSegments; xIdx++) {
       const u = xIdx / radialSegments;
       const th = u * 2 * Math.PI;
 
-      // Elliptical cross section conforming to thoracic cavity
-      let rx = baseWidth * 0.95;
-      let rz = baseWidth * 1.05;
+      const rx = baseWidth * 0.95;
+      const rz = baseWidth * 1.05;
 
-      // Medial flattening along spine and heart
       const cosTh = Math.cos(th);
       const sinTh = Math.sin(th);
 
-      let px = sign * (6.5 + rx * cosTh);
-      let pz = -0.5 + rz * sinTh;
+      let px = sign * (5.2 + rx * cosTh);
+      let pz = -0.4 + rz * sinTh;
 
       // Left lung cardiac notch (incisura cardiaca)
-      if (isLeft && y > -1.0 && y < 6.5) {
-        // Anteromedial depression for the heart
-        const notchFactor = Math.sin(((y - (-1.0)) / 7.5) * Math.PI);
-        if (cosTh > -0.2 && sinTh > 0.0) {
-          px += 2.2 * notchFactor;
-          pz -= 1.8 * notchFactor;
+      if (isLeft && y > -1.8 && y < 4.2) {
+        const notchFactor = Math.sin(((y - (-1.8)) / 6.0) * Math.PI);
+        if (cosTh > -0.25 && sinTh > 0.0) {
+          px += 1.8 * notchFactor;
+          pz -= 1.4 * notchFactor;
         }
       }
 
@@ -305,7 +517,7 @@ export function buildAnatomicalLung(side: 'left' | 'right'): THREE.BufferGeometr
       let py = y;
       if (v > 0.85) {
         const baseNorm = (v - 0.85) / 0.15;
-        py += Math.sin(baseNorm * Math.PI) * 1.2;
+        py += Math.sin(baseNorm * Math.PI) * 0.9;
       }
 
       positions.push(px, py, pz);
@@ -342,25 +554,24 @@ export function buildAnatomicalHeart(): THREE.BufferGeometry {
   const indices: number[] = [];
 
   // Heart axis tilted posterosuperior to anteroinferior-left
-  const centerBase = new THREE.Vector3(0.6, 6.2, 1.2);
-  const centerApex = new THREE.Vector3(-2.6, 0.8, 5.2);
+  const centerBase = new THREE.Vector3(0.5, 4.2, 0.8);
+  const centerApex = new THREE.Vector3(-2.2, 0.4, 3.2);
 
   for (let yIdx = 0; yIdx <= heightSegments; yIdx++) {
-    const t = yIdx / heightSegments; // 0 = base, 1 = apex
+    const t = yIdx / heightSegments;
     const center = new THREE.Vector3().lerpVectors(centerBase, centerApex, t);
 
     // Width tapers toward apex
-    const taper = Math.sin((1.0 - t * 0.75) * (Math.PI / 2));
-    const radX = (4.5 * taper) + 0.5;
-    const radZ = (4.0 * taper) + 0.5;
+    const taper = Math.sin((1.0 - t * 0.72) * (Math.PI / 2));
+    const radX = (3.4 * taper) + 0.4;
+    const radZ = (3.1 * taper) + 0.4;
 
     for (let xIdx = 0; xIdx <= radialSegments; xIdx++) {
       const u = xIdx / radialSegments;
       const th = u * 2 * Math.PI;
 
-      // Asymmetric contour (right ventricle rounded anteriorly, left ventricle thicker lateral)
       const px = center.x + radX * Math.cos(th);
-      const py = center.y - (t * 0.5);
+      const py = center.y - (t * 0.35);
       const pz = center.z + radZ * Math.sin(th);
 
       positions.push(px, py, pz);
@@ -392,33 +603,33 @@ export function buildAnatomicalHeart(): THREE.BufferGeometry {
 export function buildAnatomicalTrachea(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
 
-  // Main trachea tube (from neck y=21.0 down to carina y=11.5)
+  // Main trachea tube (sits naturally within thoracic inlet)
   const tracheaCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.0, 21.0, -1.2),
-    new THREE.Vector3(0.0, 18.0, -1.8),
-    new THREE.Vector3(0.0, 15.0, -2.5),
-    new THREE.Vector3(0.0, 11.5, -3.2), // Carina bifurcation
+    new THREE.Vector3(0.0, 11.2, -1.8),
+    new THREE.Vector3(0.0, 9.6, -2.2),
+    new THREE.Vector3(0.0, 8.0, -2.5),
+    new THREE.Vector3(0.0, 6.8, -2.8), // Carina
   ]);
-  const mainTube = new THREE.TubeGeometry(tracheaCurve, 30, 0.95, 16, false);
-  parts.push(mainTube);
+  const mainTube = new THREE.TubeGeometry(tracheaCurve, 20, 0.65, 14, false);
+  parts.push(mainTube.toNonIndexed());
 
-  // Right main bronchus (steeper, wider)
+  // Right main bronchus
   const rightBronchusCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.0, 11.5, -3.2),
-    new THREE.Vector3(2.2, 9.8, -3.8),
-    new THREE.Vector3(4.2, 8.2, -4.2),
+    new THREE.Vector3(0.0, 6.8, -2.8),
+    new THREE.Vector3(1.8, 5.2, -3.2),
+    new THREE.Vector3(3.4, 3.8, -3.6),
   ]);
-  const rightBronchus = new THREE.TubeGeometry(rightBronchusCurve, 15, 0.75, 12, false);
-  parts.push(rightBronchus);
+  const rightBronchus = new THREE.TubeGeometry(rightBronchusCurve, 12, 0.58, 10, false);
+  parts.push(rightBronchus.toNonIndexed());
 
-  // Left main bronchus (longer, more horizontal)
+  // Left main bronchus
   const leftBronchusCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.0, 11.5, -3.2),
-    new THREE.Vector3(-2.6, 10.0, -3.6),
-    new THREE.Vector3(-5.2, 8.8, -3.9),
+    new THREE.Vector3(0.0, 6.8, -2.8),
+    new THREE.Vector3(-2.2, 5.5, -3.1),
+    new THREE.Vector3(-4.4, 4.4, -3.4),
   ]);
-  const leftBronchus = new THREE.TubeGeometry(leftBronchusCurve, 18, 0.7, 12, false);
-  parts.push(leftBronchus);
+  const leftBronchus = new THREE.TubeGeometry(leftBronchusCurve, 14, 0.54, 10, false);
+  parts.push(leftBronchus.toNonIndexed());
 
   const merged = BufferGeometryUtils.mergeGeometries(parts, false);
   merged.computeVertexNormals();

@@ -250,7 +250,11 @@ async function runBrowserValidation() {
     });
     record('Reconstruction interactive controls (Replay, Reset, Auto-Rotate) present', hasControls);
 
-    // --------------------------------------------------------------------------
+    // Wait for reconstruction particle-to-mesh settling and capture screenshot
+    await sleep(2000);
+    await page.screenshot({
+      path: '/Users/ret_ice0/.gemini/antigravity/brain/b9b2f444-21a6-4c7f-8b7d-3aeeb50c5a3c/recon_screenshot.png',
+    });
     // 6. Flow 5F: AI Co-Pilot Interaction & Action Execution
     // --------------------------------------------------------------------------
     console.log('\n--- Step 6: Flow 5F — AI Co-Pilot Interaction & Action Execution ---');
