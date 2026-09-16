@@ -5,7 +5,8 @@ import {
   Layers,
   ChevronRight,
   Info,
-  Target
+  Target,
+  Atom,
 } from 'lucide-react';
 import type { Finding, Segment, Provenance, Centroid } from '../types/studystate';
 import { FINDING_ANATOMY_MAP, SEGMENT_COLORS } from '../types/studystate';
@@ -19,6 +20,7 @@ interface InsightsPanelProps {
   onFocusAnatomy: (name: string, centroid: Centroid) => void;
   focusedTarget: { name: string; centroid: Centroid } | null;
   limitations: string[];
+  onViewIn3DRecon?: (finding: Finding) => void;
 }
 
 export const InsightsPanel: React.FC<InsightsPanelProps> = ({
@@ -30,6 +32,7 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({
   onFocusAnatomy,
   focusedTarget,
   limitations,
+  onViewIn3DRecon,
 }) => {
   const [activeTab, setActiveTab] = useState<'findings' | 'anatomy'>('findings');
 
@@ -92,71 +95,96 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({
 
             {/* Findings List (18 Pathologies) */}
             <div className="space-y-1.5">
-              {findings.map((finding) => {
-                const mappedAnatomy = FINDING_ANATOMY_MAP[finding.label];
-                const isElevated = finding.band === 'elevated';
-                const isModerate = finding.band === 'moderate';
+              {findings.length === 0 ? (
+                <div className="py-8 flex flex-col items-center justify-center gap-2 text-center">
+                  <Sparkles className="w-6 h-6 text-slate-600" />
+                  <p className="text-xs text-slate-400">No analysis results yet.</p>
+                  <p className="text-[10px] font-mono text-slate-500">
+                    Select a study and click <span className="text-cyan-400">Analyze</span> to run AI inference.
+                  </p>
+                </div>
+              ) : (
+                findings.map((finding) => {
+                  const mappedAnatomy = FINDING_ANATOMY_MAP[finding.label];
+                  const isElevated = finding.band === 'elevated';
+                  const isModerate = finding.band === 'moderate';
 
-                return (
-                  <div
-                    key={finding.label}
-                    onClick={() => handleFindingClick(finding)}
-                    className={`p-2.5 rounded-lg border transition-all cursor-pointer group ${
-                      isElevated
-                        ? 'bg-rose-950/20 border-rose-500/30 hover:bg-rose-950/30 hover:border-rose-500/50'
-                        : isModerate
-                        ? 'bg-amber-950/15 border-amber-500/25 hover:bg-amber-950/25 hover:border-amber-500/40'
-                        : 'bg-slate-800/40 border-slate-800/70 hover:bg-slate-800/70 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-xs text-slate-200 group-hover:text-cyan-300 transition-colors">
-                        {finding.label}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded font-bold ${
+                  return (
+                    <div
+                      key={finding.label}
+                      onClick={() => handleFindingClick(finding)}
+                      className={`p-2.5 rounded-lg border transition-all cursor-pointer group ${
+                        isElevated
+                          ? 'bg-rose-950/20 border-rose-500/30 hover:bg-rose-950/30 hover:border-rose-500/50'
+                          : isModerate
+                          ? 'bg-amber-950/15 border-amber-500/25 hover:bg-amber-950/25 hover:border-amber-500/40'
+                          : 'bg-slate-800/40 border-slate-800/70 hover:bg-slate-800/70 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-xs text-slate-200 group-hover:text-cyan-300 transition-colors">
+                          {finding.label}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded font-bold ${
+                              isElevated
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                : isModerate
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            }`}
+                          >
+                            {finding.band}
+                          </span>
+                          <span className="font-mono text-xs font-bold text-slate-300 min-w-10 text-right">
+                            {(finding.score * 100).toFixed(1)}%
+                          </span>
+                          {mappedAnatomy && (
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-400 transition-transform group-hover:translate-x-0.5" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="w-full bg-slate-950/60 rounded-full h-1.5 mt-2 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
                             isElevated
-                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              ? 'bg-rose-500'
                               : isModerate
-                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                              ? 'bg-amber-500'
+                              : 'bg-slate-600'
                           }`}
+                          style={{ width: `${Math.max(finding.score * 100, 3)}%` }}
+                        />
+                      </div>
+
+                      {mappedAnatomy && (
+                        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-400 font-mono">
+                          <Target className="w-2.5 h-2.5 text-cyan-400" />
+                          <span>Focal Region: {mappedAnatomy.join(', ')}</span>
+                        </div>
+                      )}
+
+                      {onViewIn3DRecon && (isElevated || isModerate) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewIn3DRecon(finding);
+                          }}
+                          className="mt-2 w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 text-[10px] font-mono text-cyan-300 font-semibold transition-colors cursor-pointer"
+                          aria-label={`View ${finding.label} in 3D Reconstruction`}
                         >
-                          {finding.band}
-                        </span>
-                        <span className="font-mono text-xs font-bold text-slate-300 min-w-10 text-right">
-                          {(finding.score * 100).toFixed(1)}%
-                        </span>
-                        {mappedAnatomy && (
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-400 transition-transform group-hover:translate-x-0.5" />
-                        )}
-                      </div>
+                          <Atom className="w-3 h-3 text-cyan-400" aria-hidden="true" />
+                          <span>View in 3D Recon</span>
+                        </button>
+                      )}
                     </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full bg-slate-950/60 rounded-full h-1.5 mt-2 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          isElevated
-                            ? 'bg-rose-500'
-                            : isModerate
-                            ? 'bg-amber-500'
-                            : 'bg-slate-600'
-                        }`}
-                        style={{ width: `${Math.max(finding.score * 100, 3)}%` }}
-                      />
-                    </div>
-
-                    {mappedAnatomy && (
-                      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-slate-400 font-mono">
-                        <Target className="w-2.5 h-2.5 text-cyan-400" />
-                        <span>Focal Region: {mappedAnatomy.join(', ')}</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </>
         ) : (

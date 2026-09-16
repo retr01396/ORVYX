@@ -27,13 +27,20 @@ ORVYX is a multimodal medical-imaging research workstation combining 2D chest X-
 - Natural language inquiry (heart, lungs, aorta, trachea, measurements, limitations)
 - Cross-modality anatomy navigation: Co-Pilot finding → MPR crosshair snap + 3D camera focus
 
+### Phase 4 — 2D X-Ray → Cinematic 3D Reconstruction & Multi-Provider Co-Pilot
+- **GPU Particle Reconstruction**: 12,000 to 60,000 particles converging from 2D space into 3D thoracic anatomy at ~60 FPS
+- **Explicit Medical Disclaimer**: Labeled "AI-ESTIMATED THORACIC ANATOMY (Template)" with clear disclaimer that single 2D projections do not produce patient-specific 3D depth
+- **Thoracic Skeletal & Visceral Template**: 9 structures (rib cage 12 pairs, sternum, thoracic spine T1–T12, clavicles, scapulae, lungs, heart, trachea) with 18 finding mappings
+- **Multi-Provider Co-Pilot**: Offline deterministic engine (default), self-hosted Custom LLM (`CUSTOM_LLM_BASE_URL`), and external API gateway (`AI_API_BASE_URL`, `AI_API_KEY`) with automated fallback and zero secret leakage
+- **Bidirectional 2D ↔ 3D Synchronization**: Finding selection in 2D Viewport/InsightsPanel highlights corresponding 3D structures; interactive 3D raycaster click selects anatomy
+
 ### Phase 5 — Custom Study Ingestion
 - Drag-and-drop or file-picker radiograph upload (PNG, JPEG, TIFF, BMP; max 50 MB)
 - Server-side format, size, and pixel-geometry validation
 - DenseNet-121 + PSPNet inference on uploaded studies
 - Dynamic Study Registry and dynamic Co-Pilot context per active study
 
-### Phase 6 — Production Hardening (this release)
+### Phase 6 — Production Hardening
 - Path traversal protection on all file-serving endpoints
 - Strict parameter allowlists for CT plane, window, and structure IDs (HTTP 400 on violation)
 - Filename sanitization on upload (basename extraction)
@@ -153,6 +160,7 @@ The Vite dev server proxies all `/api/*` requests to the backend at `http://loca
 backend/.venv/bin/python scripts/smoke_test_phase1.py  # 8 tests
 backend/.venv/bin/python scripts/smoke_test_phase2.py  # 20 tests
 backend/.venv/bin/python scripts/smoke_test_phase3.py  # 26 tests
+backend/.venv/bin/python scripts/smoke_test_phase4.py  # 42 tests
 backend/.venv/bin/python scripts/smoke_test_phase5.py  # 25 tests
 backend/.venv/bin/python scripts/smoke_test_phase6.py  # 46 tests
 
@@ -160,7 +168,7 @@ backend/.venv/bin/python scripts/smoke_test_phase6.py  # 46 tests
 cd frontend && npm run build
 ```
 
-**Cumulative verified result: 125/125 tests passing**
+**Cumulative verified result: 167/167 tests passing**
 
 ---
 
@@ -181,7 +189,7 @@ CT segmentation meshes were pre-computed with **TotalSegmentator v2** (nnUNetV2,
 - Non-contrast CT: endoluminal thrombi and coronary calcifications cannot be fully characterized
 - 2D radiograph has projectional tissue overlap; no lateral projection available
 - TotalSegmentator fast mode uses 3 mm isotropic downsampling
-- AI Co-Pilot is deterministic and offline — it does not use a generative LLM
+- AI Co-Pilot default is deterministic and offline — external providers clearly show data transmission warnings
 - Single CT baseline study; longitudinal comparison is not implemented
 
 ---
@@ -193,9 +201,7 @@ CT segmentation meshes were pre-computed with **TotalSegmentator v2** (nnUNetV2,
 | Phase 1 | 2D CXR pipeline (DenseNet-121 + PSPNet, MPS) | 8/8 |
 | Phase 2 | CT/MPR workstation + 3D anatomy viewer | 20/20 |
 | Phase 3 | AI Co-Pilot (deterministic, multimodal) | 26/26 |
+| Phase 4 | 2D X-ray → 3D Particle Recon & Multi-Provider Co-Pilot | 42/42 |
 | Phase 5 | Custom study ingestion + unified workflow | 25/25 |
 | Phase 6 | Production hardening, security, accessibility | 46/46 |
-
-## Deferred
-
-**Phase 4** — High-fidelity Slicer-derived 3D visualization pipeline (volumetric raycasting, GLB/OBJ export, cinematic rendering). The current Three.js mesh viewer from Phase 2 remains fully functional.
+| **Total** | **All cumulative regression test suites** | **167/167** |

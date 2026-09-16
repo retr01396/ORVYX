@@ -31,3 +31,8 @@ _research/
 # Uploads & Temp Data
 assets/demo/uploads/upload-*
 
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+

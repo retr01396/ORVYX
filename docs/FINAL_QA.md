@@ -33,9 +33,10 @@
 | Phase 1 | `smoke_test_phase1.py` | **8 / 8 PASS** |
 | Phase 2 | `smoke_test_phase2.py` | **20 / 20 PASS** |
 | Phase 3 | `smoke_test_phase3.py` | **26 / 26 PASS** |
+| Phase 4 | `smoke_test_phase4.py` | **42 / 42 PASS** |
 | Phase 5 | `smoke_test_phase5.py` | **25 / 25 PASS** |
 | Phase 6 | `smoke_test_phase6.py` | **46 / 46 PASS** |
-| **Cumulative** | All suites | **125 / 125 PASS** |
+| **Cumulative** | All suites | **167 / 167 PASS (100%)** |
 
 ---
 
@@ -48,6 +49,11 @@
 | Demo X-ray image serve | `GET /api/xray/image/demo-1` | ✓ |
 | DenseNet-121 pathology inference | `POST /api/xray/analyze` | ✓ 18 findings, ~250 ms |
 | PSPNet segmentation | included in analyze | ✓ 14 segments |
+| 3D Thoracic Template | `GET /api/reconstruction/template` | ✓ 9 structures, 18 mappings |
+| Structure validation | `/api/reconstruction/structures/validate` | ✓ Whitelist enforced |
+| Co-Pilot provider info | `GET /api/copilot/provider-info` | ✓ Zero secrets exposed |
+| Cinematic 3D Particle Recon | Frontend WebGL | ✓ 60 FPS, GPU-driven |
+| 2D ↔ 3D finding sync | InsightsPanel & 3D Viewer | ✓ Bidirectional highlight |
 | CT study load | `GET /api/ct/study` | ✓ 8 structures |
 | Axial slice | `GET /api/ct/slice?plane=axial` | ✓ 512×512 PNG |
 | Coronal slice | `GET /api/ct/slice?plane=coronal` | ✓ 512×456 PNG |

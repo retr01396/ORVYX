@@ -13,6 +13,7 @@ interface ViewportProps {
   onClearFocus: () => void;
   opacity: number;
   setOpacity: (val: number) => void;
+  analyzing?: boolean;
 }
 
 export const Viewport: React.FC<ViewportProps> = ({
@@ -24,6 +25,7 @@ export const Viewport: React.FC<ViewportProps> = ({
   onClearFocus,
   opacity,
   setOpacity,
+  analyzing = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1.0);
@@ -111,22 +113,24 @@ export const Viewport: React.FC<ViewportProps> = ({
   const allVisible = segments.length > 0 && segments.every((s) => visibleSegments[s.name]);
 
   return (
-    <main className="flex-1 flex flex-col bg-slate-950 relative overflow-hidden select-none">
+    <main className="flex-1 flex flex-col bg-slate-950 relative overflow-hidden select-none" role="region" aria-label="X-Ray Viewport">
       {/* Viewport Floating Controls Toolbar */}
       <div className="absolute top-4 left-4 z-30 flex items-center gap-2 bg-slate-900/90 border border-slate-800 p-1.5 rounded-lg shadow-xl backdrop-blur-md">
         <button
           onClick={() => setZoom((z) => Math.min(z + 0.25, 4.0))}
           className="p-1.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors"
           title="Zoom In"
+          aria-label="Zoom in"
         >
-          <ZoomIn className="w-4 h-4" />
+          <ZoomIn className="w-4 h-4" aria-hidden="true" />
         </button>
         <button
           onClick={() => setZoom((z) => Math.max(z - 0.25, 0.5))}
           className="p-1.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors"
           title="Zoom Out"
+          aria-label="Zoom out"
         >
-          <ZoomOut className="w-4 h-4" />
+          <ZoomOut className="w-4 h-4" aria-hidden="true" />
         </button>
         <span className="text-[11px] font-mono font-semibold text-cyan-400 px-1.5">
           {Math.round(zoom * 100)}%
@@ -136,8 +140,9 @@ export const Viewport: React.FC<ViewportProps> = ({
           onClick={handleReset}
           className="p-1.5 rounded hover:bg-slate-800 text-slate-300 hover:text-white transition-colors flex items-center gap-1 text-xs"
           title="Reset View"
+          aria-label="Reset view to default zoom and position"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
+          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="text-[10px]">Reset</span>
         </button>
 
@@ -152,14 +157,16 @@ export const Viewport: React.FC<ViewportProps> = ({
               : 'hover:bg-slate-800 text-slate-400'
           }`}
           title={allVisible ? 'Hide All Anatomical Masks' : 'Show All Anatomical Masks'}
+          aria-label={allVisible ? 'Hide all anatomical masks' : 'Show all anatomical masks'}
+          aria-pressed={allVisible}
         >
-          {allVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+          {allVisible ? <Eye className="w-3.5 h-3.5" aria-hidden="true" /> : <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />}
           <span>{allVisible ? 'Anatomy On' : 'Anatomy Off'}</span>
         </button>
 
         {/* Opacity Slider */}
         <div className="flex items-center gap-1.5 px-2">
-          <Sliders className="w-3 h-3 text-slate-400" />
+          <Sliders className="w-3 h-3 text-slate-400" aria-hidden="true" />
           <input
             type="range"
             min="0.1"
@@ -169,6 +176,7 @@ export const Viewport: React.FC<ViewportProps> = ({
             onChange={(e) => setOpacity(parseFloat(e.target.value))}
             className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
             title={`Overlay Opacity: ${Math.round(opacity * 100)}%`}
+            aria-label={`Overlay opacity: ${Math.round(opacity * 100)} percent`}
           />
           <span className="text-[10px] font-mono text-slate-400 w-6">
             {Math.round(opacity * 100)}%
@@ -179,7 +187,7 @@ export const Viewport: React.FC<ViewportProps> = ({
       {/* Focus Indicator Pill if finding clicked */}
       {focusedTarget && (
         <div className="absolute top-4 right-4 z-30 flex items-center gap-2 bg-slate-900/95 border border-cyan-500/40 px-3 py-1.5 rounded-lg shadow-xl backdrop-blur-md animate-fadeIn">
-          <Crosshair className="w-4 h-4 text-cyan-400 animate-spin" style={{ animationDuration: '4s' }} />
+          <Crosshair className="w-4 h-4 text-cyan-400 animate-spin" style={{ animationDuration: '4s' }} aria-hidden="true" />
           <div className="text-xs">
             <span className="text-slate-400 text-[10px] uppercase font-mono block">Focal Structure:</span>
             <span className="font-bold text-cyan-300">{focusedTarget.name}</span>
@@ -190,6 +198,7 @@ export const Viewport: React.FC<ViewportProps> = ({
           <button
             onClick={onClearFocus}
             className="ml-2 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300"
+            aria-label="Clear focal structure"
           >
             Clear
           </button>
@@ -221,7 +230,7 @@ export const Viewport: React.FC<ViewportProps> = ({
           {/* Base X-Ray Image */}
           <img
             src={`/api/xray/image/${studyId}`}
-            alt="Chest Radiograph"
+            alt="Chest radiograph for analysis"
             className="w-full h-full object-contain pointer-events-none filter contrast-105"
             draggable={false}
           />
@@ -274,6 +283,17 @@ export const Viewport: React.FC<ViewportProps> = ({
             </div>
           )}
         </div>
+
+        {/* Analyzing Overlay — shown while MPS inference is running */}
+        {analyzing && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-sm z-40 gap-3">
+            <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+            <div className="text-center">
+              <p className="text-xs font-semibold text-cyan-300">Running MPS Inference…</p>
+              <p className="text-[10px] font-mono text-slate-400 mt-0.5">DenseNet-121 + PSPNet</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Viewport Footer with Pixel Coordinates & Metadata */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Focus,
@@ -9,6 +9,7 @@ import {
   X,
   CheckCircle2,
   ChevronRight,
+  Atom,
 } from 'lucide-react';
 import type {
   CoPilotResponse,
@@ -17,6 +18,15 @@ import type {
   AskResponse,
 } from '../../types/copilot';
 
+interface ProviderInfo {
+  provider_mode: string;
+  provider_name: string;
+  is_external: boolean;
+  external_warning?: string | null;
+  custom_llm_configured: boolean;
+  api_configured: boolean;
+}
+
 interface AICoPilotPanelProps {
   data: CoPilotResponse | null;
   loading: boolean;
@@ -24,6 +34,7 @@ interface AICoPilotPanelProps {
   onSelectFinding: (finding: CoPilotFinding) => void;
   onSelectMeasurement: (measurement: CoPilotMeasurement) => void;
   selectedFindingId: string | null;
+  onViewIn3DRecon?: (structureId: string) => void;
 }
 
 const PREDEFINED_PROMPTS = [
@@ -42,11 +53,20 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
   onSelectFinding,
   onSelectMeasurement,
   selectedFindingId,
+  onViewIn3DRecon,
 }) => {
   const [question, setQuestion] = useState<string>('');
   const [asking, setAsking] = useState<boolean>(false);
   const [askResult, setAskResult] = useState<AskResponse | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
+  const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
+
+  useEffect(() => {
+    fetch('/api/copilot/provider-info')
+      .then(res => res.ok ? res.json() : null)
+      .then(info => { if (info) setProviderInfo(info); })
+      .catch(() => {});
+  }, []);
 
   const handleAsk = async (queryText: string) => {
     if (!queryText.trim() || asking) return;
@@ -93,8 +113,14 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
           <div>
             <div className="flex items-center gap-1.5">
               <h2 className="font-bold text-sm text-white tracking-wide">AI Co-Pilot</h2>
-              <span className="text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                Phase 3 Verified
+              <span className={`text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.2 rounded border ${
+                providerInfo?.is_external
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : providerInfo?.provider_mode === 'custom_llm'
+                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                  : 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+              }`}>
+                {providerInfo ? providerInfo.provider_name : 'Deterministic'}
               </span>
             </div>
             <p className="text-[10px] text-slate-400 font-mono leading-none">
@@ -111,6 +137,14 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {/* External Provider Data Disclosure Notice */}
+      {providerInfo?.is_external && providerInfo.external_warning && (
+        <div className="mx-3 mt-2 p-2 rounded-lg bg-amber-950/60 border border-amber-500/40 flex items-start gap-1.5 text-[10px] text-amber-300 font-mono">
+          <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+          <span>{providerInfo.external_warning}</span>
+        </div>
+      )}
 
       {/* 2. Scrollable Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar">
@@ -365,27 +399,39 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
                   )}
 
                   {askResult.target_structure_id && (
-                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                      <span className="text-[10px] font-mono text-slate-400">
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-mono text-slate-400 truncate">
                         Referenced: {askResult.target_structure_id}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const matchingFinding = data.findings.find(
-                            (f) =>
-                              f.anatomy &&
-                              f.anatomy.structure_id === askResult.target_structure_id
-                          );
-                          if (matchingFinding) {
-                            onSelectFinding(matchingFinding);
-                          }
-                        }}
-                        className="px-2 py-0.5 rounded bg-purple-600/30 text-purple-200 hover:bg-purple-600 hover:text-white border border-purple-500/40 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <Focus className="w-3 h-3" />
-                        <span>Focus Structure</span>
-                      </button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {onViewIn3DRecon && (
+                          <button
+                            type="button"
+                            onClick={() => onViewIn3DRecon(askResult.target_structure_id!)}
+                            className="px-2 py-0.5 rounded bg-cyan-900/40 text-cyan-200 hover:bg-cyan-800/60 border border-cyan-500/40 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Atom className="w-3 h-3 text-cyan-400" />
+                            <span>3D Recon</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const matchingFinding = data.findings.find(
+                              (f) =>
+                                f.anatomy &&
+                                f.anatomy.structure_id === askResult.target_structure_id
+                            );
+                            if (matchingFinding) {
+                              onSelectFinding(matchingFinding);
+                            }
+                          }}
+                          className="px-2 py-0.5 rounded bg-purple-600/30 text-purple-200 hover:bg-purple-600 hover:text-white border border-purple-500/40 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Focus className="w-3 h-3" />
+                          <span>Focus</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

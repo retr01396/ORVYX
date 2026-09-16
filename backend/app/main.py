@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import DEVICE
 from app.services.inference import model_manager
 from app.api import xray, ct, copilot
+from app.api import reconstruction
 
 # Configure application logging
 logging.basicConfig(
@@ -26,7 +27,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ORVYX AI Medical Imaging Workstation",
     description="Backend API service for AI-assisted thoracic imaging analysis",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -43,14 +44,16 @@ app.add_middleware(
 app.include_router(xray.router)
 app.include_router(ct.router)
 app.include_router(copilot.router)
+app.include_router(reconstruction.router)
 
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint confirming model readiness and active hardware device."""
     return {
         "status": "healthy",
-        "service": "ORVYX 2D CXR Pipeline",
+        "service": "ORVYX Multimodal AI Workstation",
         "device": model_manager.device,
         "models_loaded": model_manager.classifier is not None and model_manager.segmenter is not None,
         "load_duration_s": round(model_manager.load_duration_s, 3)
     }
+

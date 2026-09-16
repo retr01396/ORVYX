@@ -1,7 +1,7 @@
 import React from 'react';
-import { Activity, Box, Sparkles, Cpu, Layers, Cuboid } from 'lucide-react';
+import { Activity, Box, Sparkles, Cpu, Layers, Cuboid, Atom } from 'lucide-react';
 
-export type WorkstationViewMode = 'xray' | 'ct' | '3d';
+export type WorkstationViewMode = 'xray' | 'ct' | '3d' | 'reconstruction';
 
 interface HeaderProps {
   device?: string;
@@ -97,6 +97,25 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Cuboid className={`w-3.5 h-3.5 ${viewMode === '3d' ? 'text-indigo-400' : 'text-slate-400'}`} />
           <span>3D ANATOMY</span>
+        </button>
+
+        {/* 4. 2D→3D Reconstruction Tab */}
+        <button
+          onClick={() => onViewModeChange('reconstruction')}
+          role="tab"
+          aria-selected={viewMode === 'reconstruction'}
+          aria-label="Switch to 2D X-Ray to 3D Reconstruction view"
+          className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+            viewMode === 'reconstruction'
+              ? 'bg-cyan-950/90 text-cyan-200 border border-cyan-400/60 shadow-sm shadow-cyan-400/25'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Atom className={`w-3.5 h-3.5 ${viewMode === 'reconstruction' ? 'text-cyan-300 animate-spin' : 'text-slate-400'}`} style={viewMode === 'reconstruction' ? { animationDuration: '4s' } : {}} aria-hidden="true" />
+          <span>3D RECON</span>
+          {viewMode === 'reconstruction' && (
+            <span className="text-[9px] uppercase px-1 rounded font-mono bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">AI</span>
+          )}
         </button>
 
         <div className="w-[1px] h-5 bg-slate-800 mx-1" />

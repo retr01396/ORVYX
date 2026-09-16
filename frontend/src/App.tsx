@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Banner } from './components/Banner';
 import { Header, type WorkstationViewMode } from './components/Header';
 import { StudyRail } from './components/StudyRail';
@@ -8,9 +8,13 @@ import { CTControlPanel } from './components/ct/CTControlPanel';
 import { MPRViewer } from './components/ct/MPRViewer';
 import { Volume3DViewer } from './components/ct/Volume3DViewer';
 import { AICoPilotPanel } from './components/copilot/AICoPilotPanel';
-import type { StudySummary, StudyState, Centroid } from './types/studystate';
+import { ThoracicReconstructionViewer } from './components/reconstruction/ThoracicReconstructionViewer';
+import { ReconstructionPanel } from './components/reconstruction/ReconstructionPanel';
+import type { StudySummary, StudyState, Centroid, Finding } from './types/studystate';
 import type { CTStudyMetadata, CrosshairPosition } from './types/ct';
 import type { CoPilotResponse, CoPilotFinding, CoPilotMeasurement } from './types/copilot';
+import type { ThoracicStructure, ReconstructionPhase } from './types/reconstruction';
+import { FINDING_TO_3D_STRUCTURE } from './types/reconstruction';
 
 export const App: React.FC = () => {
   // Top-level unified modality switch: 'xray' | 'ct' | '3d'
@@ -21,6 +25,9 @@ export const App: React.FC = () => {
   // ==========================================
   const [studies, setStudies] = useState<StudySummary[]>([]);
   const [selectedStudyId, setSelectedStudyId] = useState<string>('demo-1');
+  // Ref that always holds the current selectedStudyId — used in async closures
+  // to correctly discard stale responses when the user switches studies mid-flight.
+  const activeStudyRef = useRef<string>('demo-1');
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -50,6 +57,68 @@ export const App: React.FC = () => {
   const [copilotData, setCopilotData] = useState<CoPilotResponse | null>(null);
   const [loadingCoPilot, setLoadingCoPilot] = useState<boolean>(false);
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
+
+  // ==========================================
+  // PHASE 4: 3D RECONSTRUCTION STATE
+  // ==========================================
+  const [reconstructionPhase, setReconstructionPhase] = useState<ReconstructionPhase>('idle');
+  const [reconstructionProgress, setReconstructionProgress] = useState<number>(0);
+  const [thoracicStructures, setThoracicStructures] = useState<ThoracicStructure[]>([]);
+  const [reconVisibleStructures, setReconVisibleStructures] = useState<Record<string, boolean>>({});
+  const [reconHighlightedIds, setReconHighlightedIds] = useState<string[]>([]);
+
+  // Fetch thoracic template on mount
+  useEffect(() => {
+    fetch('/api/reconstruction/template')
+      .then(res => res.ok ? res.json() : null)
+      .then((data: { structures: ThoracicStructure[]; finding_map: Record<string, string[]> } | null) => {
+        if (!data) return;
+        setThoracicStructures(data.structures);
+        const vis: Record<string, boolean> = {};
+        data.structures.forEach(s => { vis[s.id] = true; });
+        setReconVisibleStructures(vis);
+      })
+      .catch(() => {/* template fetch fail is non-fatal */});
+  }, []);
+
+  // Auto-advance reconstruction phase when analysis completes
+  useEffect(() => {
+    if (viewMode !== 'reconstruction') return;
+    const result = studyStates[selectedStudyId];
+    if (result && reconstructionPhase === 'idle') {
+      setReconstructionPhase('building');
+      setReconstructionProgress(45);
+    }
+  }, [viewMode, studyStates, selectedStudyId, reconstructionPhase]);
+
+  // When switching to reconstruction tab and analysis is already done, start animation
+  const handleViewModeChange = useCallback((mode: WorkstationViewMode) => {
+    setViewMode(mode);
+    if (mode === 'reconstruction') {
+      const result = studyStates[selectedStudyId];
+      if (result) {
+        setReconstructionPhase('building');
+        setReconstructionProgress(45);
+      } else if (!analyzing) {
+        setReconstructionPhase('analyzing');
+        setReconstructionProgress(20);
+        handleAnalyze(selectedStudyId);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyStates, selectedStudyId, analyzing]);
+
+  const handleToggleReconStructure = useCallback((id: string) => {
+    setReconVisibleStructures(prev => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const handleViewFindingIn3D = useCallback((finding: Finding) => {
+    setViewMode('reconstruction');
+    const mapped = FINDING_TO_3D_STRUCTURE[finding.label] || [];
+    setReconHighlightedIds(mapped);
+    setReconstructionPhase('building');
+    setReconstructionProgress(45);
+  }, []);
 
   // 1. Fetch available studies (demo + uploaded)
   useEffect(() => {
@@ -121,6 +190,8 @@ export const App: React.FC = () => {
         return res.json();
       })
       .then((data: CoPilotResponse) => {
+        // Discard stale response if user has switched to a different study
+        if (activeStudyRef.current !== studyId) return;
         setCopilotData(data);
       })
       .catch((err) => {
@@ -130,6 +201,7 @@ export const App: React.FC = () => {
         setLoadingCoPilot(false);
       });
   };
+
 
   // 4. Fetch / refresh Co-Pilot context when opened or active study changes
   useEffect(() => {
@@ -157,10 +229,12 @@ export const App: React.FC = () => {
 
       const newStudy: StudySummary = await res.json();
       setStudies((prev) => [newStudy, ...prev.filter((s) => s.study_id !== newStudy.study_id)]);
+      activeStudyRef.current = newStudy.study_id;
       setSelectedStudyId(newStudy.study_id);
       setViewMode('xray');
       // Trigger analysis immediately upon ingestion
       handleAnalyze(newStudy.study_id);
+
     } catch (err: any) {
       console.error('Upload failed:', err);
       setUploadError(err.message || 'File upload failed');
@@ -174,7 +248,6 @@ export const App: React.FC = () => {
   const handleAnalyze = async (studyId: string) => {
     setAnalyzing(true);
     setError(null);
-    const requestStudyId = studyId; // capture at call time to guard against race conditions
     try {
       const res = await fetch('/api/xray/analyze', {
         method: 'POST',
@@ -188,11 +261,13 @@ export const App: React.FC = () => {
       }
 
       const state: StudyState = await res.json();
-      // Only update state if the same study is still selected (guard rapid study switches)
-      setStudyStates((prev) => {
-        if (requestStudyId !== studyId) return prev; // studyId has already changed — discard
-        return { ...prev, [studyId]: state };
-      });
+      // Only update state if this analysis is still for the active study.
+      // activeStudyRef.current always reflects the current selectedStudyId at the
+      // time the response arrives — unlike the closure-captured studyId which
+      // is frozen at call time but never changes (making it useless as a guard).
+      if (activeStudyRef.current !== studyId) return;
+
+      setStudyStates((prev) => ({ ...prev, [studyId]: state }));
 
       // Initialize all 14 segments as visible by default
       const initialVisibility: Record<string, boolean> = {};
@@ -314,6 +389,12 @@ export const App: React.FC = () => {
         }
       }
     }
+
+    // Phase 4: Also highlight corresponding 3D reconstruction structures
+    const structIds = FINDING_TO_3D_STRUCTURE[finding.title] ?? [];
+    if (structIds.length > 0) {
+      setReconHighlightedIds(structIds);
+    }
   };
 
   const handleSelectCoPilotMeasurement = (measurement: CoPilotMeasurement) => {
@@ -344,7 +425,7 @@ export const App: React.FC = () => {
         device={currentResult?.provenance.device || 'mps'}
         runtimeMs={currentResult?.provenance.runtime_ms}
         viewMode={viewMode}
-        onViewModeChange={setViewMode}
+        onViewModeChange={handleViewModeChange}
         isCoPilotOpen={isCoPilotOpen}
         onToggleCoPilot={() => setIsCoPilotOpen(!isCoPilotOpen)}
         activeStudyTitle={currentStudy?.title}
@@ -377,6 +458,7 @@ export const App: React.FC = () => {
               selectedId={selectedStudyId}
               onSelectStudy={(id) => {
                 if (id !== selectedStudyId) {
+                  activeStudyRef.current = id;
                   setSelectedStudyId(id);
                   setFocusedTarget(null);
                   setSelectedFindingId(null);
@@ -404,6 +486,7 @@ export const App: React.FC = () => {
               onClearFocus={handleClearFocus}
               opacity={opacity}
               setOpacity={setOpacity}
+              analyzing={analyzing}
             />
 
             {/* Right: AI Findings & Insights Panel (shown when Co-Pilot panel is closed) */}
@@ -417,6 +500,7 @@ export const App: React.FC = () => {
                 onFocusAnatomy={handleFocusAnatomy}
                 focusedTarget={focusedTarget}
                 limitations={currentResult?.limitations || []}
+                onViewIn3DRecon={handleViewFindingIn3D}
               />
             )}
           </>
@@ -479,6 +563,52 @@ export const App: React.FC = () => {
               ) : (
                 <div className="flex-1 flex items-center justify-center text-slate-400 font-mono text-xs">
                   Loading 3D Volume & Mesh Geometry...
+                </div>
+              )}
+            </div>
+          </>
+        ) : viewMode === 'reconstruction' ? (
+          /* Phase 4: X-ray → Cinematic 3D Thoracic Reconstruction */
+          <>
+            {/* Left: Reconstruction Progress Panel */}
+            <ReconstructionPanel
+              phase={reconstructionPhase}
+              progress={reconstructionProgress}
+              structures={thoracicStructures}
+              visibleStructures={reconVisibleStructures}
+              onToggleStructure={handleToggleReconStructure}
+              highlightedStructureIds={reconHighlightedIds}
+              elevatedFindings={currentResult?.findings?.filter(f => f.band !== 'low') ?? []}
+              studyTitle={currentStudy?.title}
+            />
+
+            {/* Center: Cinematic 3D Reconstruction Viewport */}
+            <div className="flex-1 relative overflow-hidden">
+              {thoracicStructures.length > 0 ? (
+                <ThoracicReconstructionViewer
+                  structures={thoracicStructures}
+                  phase={reconstructionPhase}
+                  highlightedStructureIds={reconHighlightedIds}
+                  visibleStructures={reconVisibleStructures}
+                  onPhaseComplete={() => {
+                    setReconstructionPhase('complete');
+                    setReconstructionProgress(100);
+                  }}
+                  onSelectStructure={(id) => {
+                    setReconHighlightedIds(prev =>
+                      prev.includes(id) ? prev.filter(x => x !== id) : [id]
+                    );
+                  }}
+                  studyImageUrl={
+                    selectedStudyId
+                      ? `/api/xray/image/${selectedStudyId}`
+                      : null
+                  }
+                  studyId={selectedStudyId}
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-slate-400 font-mono text-xs">
+                  Loading thoracic template…
                 </div>
               )}
             </div>
@@ -546,6 +676,12 @@ export const App: React.FC = () => {
             onSelectFinding={handleSelectCoPilotFinding}
             onSelectMeasurement={handleSelectCoPilotMeasurement}
             selectedFindingId={selectedFindingId}
+            onViewIn3DRecon={(structureId: string) => {
+              setViewMode('reconstruction');
+              setReconHighlightedIds([structureId]);
+              setReconstructionPhase('building');
+              setReconstructionProgress(45);
+            }}
           />
         )}
       </div>
