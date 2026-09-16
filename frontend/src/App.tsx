@@ -546,7 +546,7 @@ export const App: React.FC = () => {
               </div>
 
               {ctMetadata ? (
-                <div className="flex-1 relative">
+                <div className="flex-1 relative min-h-0 w-full h-full">
                   <Volume3DViewer
                     structures={ctMetadata.structures}
                     visibleStructures={ctVisibleStructures}
@@ -580,6 +580,7 @@ export const App: React.FC = () => {
               highlightedStructureIds={reconHighlightedIds}
               elevatedFindings={currentResult?.findings?.filter(f => f.band !== 'low') ?? []}
               studyTitle={currentStudy?.title}
+              studyImageUrl={selectedStudyId ? `/api/xray/image/${selectedStudyId}` : null}
             />
 
             {/* Center: Cinematic 3D Reconstruction Viewport */}

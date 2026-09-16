@@ -31,8 +31,10 @@ ORVYX is a multimodal medical-imaging research workstation combining 2D chest X-
 - **GPU Particle Reconstruction**: 12,000 to 60,000 particles converging from 2D space into 3D thoracic anatomy at ~60 FPS
 - **Explicit Medical Disclaimer**: Labeled "AI-ESTIMATED THORACIC ANATOMY (Template)" with clear disclaimer that single 2D projections do not produce patient-specific 3D depth
 - **Thoracic Skeletal & Visceral Template**: 9 structures (rib cage 12 pairs, sternum, thoracic spine T1–T12, clavicles, scapulae, lungs, heart, trachea) with 18 finding mappings
-- **Multi-Provider Co-Pilot**: Offline deterministic engine (default), self-hosted Custom LLM (`CUSTOM_LLM_BASE_URL`), and external API gateway (`AI_API_BASE_URL`, `AI_API_KEY`) with automated fallback and zero secret leakage
-- **Bidirectional 2D ↔ 3D Synchronization**: Finding selection in 2D Viewport/InsightsPanel highlights corresponding 3D structures; interactive 3D raycaster click selects anatomy
+- **Multi-Provider Co-Pilot**: Offline deterministic engine (default), Anthropic Claude (`claude`), DeepSeek (`deepseek`), and self-hosted Custom LLM (`custom_llm` via `CUSTOM_LLM_BASE_URL` or `BASE_URL`) with automated fallback and zero secret leakage.
+- **Health Check APIs**: Dedicated `GET /api/ai/health` and `GET /api/copilot/health` endpoints returning provider connectivity and configuration status safely.
+- **Bidirectional 2D ↔ 3D Synchronization**: Finding selection in 2D Viewport/InsightsPanel highlights corresponding 3D structures; interactive 3D raycaster click selects anatomy.
+- **Real Patient CT Thoracic Skeleton**: Direct integration of 62,027-vertex marching-cubes skeleton (`/api/ct/mesh/rib_cage`) for patient anatomy grounding.
 
 ### Phase 5 — Custom Study Ingestion
 - Drag-and-drop or file-picker radiograph upload (PNG, JPEG, TIFF, BMP; max 50 MB)

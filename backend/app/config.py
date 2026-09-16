@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import torch
+from dotenv import load_dotenv
 
 # Base paths
 APP_DIR = Path(__file__).resolve().parent
@@ -9,6 +10,10 @@ ROOT_DIR = BACKEND_DIR.parent
 ASSETS_DEMO_DIR = ROOT_DIR / "assets" / "demo"
 ASSETS_UPLOADS_DIR = ASSETS_DEMO_DIR / "uploads"
 WEIGHTS_CACHE_DIR = BACKEND_DIR / "weights_cache"
+
+# Load environment variables from .env files
+load_dotenv(ROOT_DIR / ".env")
+load_dotenv(BACKEND_DIR / ".env")
 
 # Ensure directories exist
 WEIGHTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)

@@ -268,6 +268,7 @@ const OrthogonalPlane: React.FC<OrthogonalPlaneProps> = ({
                   backgroundColor: s.color,
                   maskImage: `url(/api/ct/mask-slice?structure=${s.id}&plane=${plane}&index=${index})`,
                   WebkitMaskImage: `url(/api/ct/mask-slice?structure=${s.id}&plane=${plane}&index=${index})`,
+                  maskMode: 'alpha',
                   maskSize: 'contain',
                   WebkitMaskSize: 'contain',
                   maskRepeat: 'no-repeat',

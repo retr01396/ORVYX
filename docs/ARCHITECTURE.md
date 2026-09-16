@@ -404,7 +404,22 @@ Phase 4 bridges 2D projection imaging and 3D thoracic anatomy through a cinemati
                            - Raycaster Mesh Focus              Structure Toggles)
 ```
 
-### 6.3 Verification Suite
+### 6.3 System Hardening, 2D/3D Lifecycle & Multi-Provider Architecture
+1. **Alpha Mask Transparency**:
+   - Both 2D CXR masks (`inference.py: _mask_to_base64_png`) and CT MPR slice overlays (`ct_service.py: get_mask_slice_png`) generate 4-channel RGBA PNGs where alpha channel corresponds to the uint8 binary segmentation mask.
+   - Frontend components (`Viewport.tsx` and `MPRViewer.tsx`) utilize `maskMode: 'alpha'` to eliminate the flat opaque rectangle and green tint bugs in WebKit/Blink browsers.
+2. **WebGL Context Lifecycle & React StrictMode Resilience**:
+   - `Volume3DViewer.tsx` and `ThoracicReconstructionViewer.tsx` dynamically instantiate and append `<canvas>` inside container divs, disposing renderers, geometries, and materials upon unmount without destroying reusable context.
+   - Preserves mesh reattachment and avoids black viewport failures across component remounts.
+3. **Patient CT Thoracic Skeleton Integration**:
+   - 62,027 vertices and 129,138 faces extracted from patient CT (`CT-chest.nrrd`) at HU $\ge 220$ via marching cubes (`step_size=3`).
+   - Served via `GET /api/ct/mesh/rib_cage` and rendered in the 3D Reconstruction Viewport with coral-red (`#f43f5e`) emissive finding highlights matching target references.
+4. **Multi-Provider LLM & Health Check Endpoints**:
+   - Supported providers: `deterministic` (default, 100% offline), `claude` (Anthropic v1/messages), `deepseek` (DeepSeek Chat API), `custom_llm` (self-hosted OpenAI-compatible endpoint with `BASE_URL` and `API_KEY` aliases).
+   - Dedicated health check endpoints: `GET /api/ai/health` and `GET /api/copilot/health` returning provider status, model, and configuration safely with zero credential leakage.
+   - Co-Pilot responses emit structured actions (`SHOW_STRUCTURE`, `FOCUS_STRUCTURE`, `FOCUS_FINDING`, `NAVIGATE_VIEW`) to drive workstation camera and view transitions.
+
+### 6.4 Verification Suite
 - **Phase 4 Smoke Test**: `scripts/smoke_test_phase4.py` (**42 / 42 tests PASSED**).
 - **Cumulative Verification Suite**:
   - Phase 1: 8 / 8 tests PASSED
@@ -414,6 +429,7 @@ Phase 4 bridges 2D projection imaging and 3D thoracic anatomy through a cinemati
   - Phase 5: 25 / 25 tests PASSED
   - Phase 6: 46 / 46 tests PASSED
   - **Cumulative Total: 167 / 167 tests PASSED (100%)**
-- **Frontend Production Build**: `npm run build` succeeds cleanly in 138ms.
+- **Frontend Production Build**: `npm run build` succeeds cleanly.
+
 
 

@@ -44,7 +44,8 @@ ORGAN_LABELS = {
     "lung_middle_lobe_right": "Right Middle Lobe",
     "lung_lower_lobe_right": "Right Lower Lobe",
     "lung_upper_lobe_left": "Left Upper Lobe",
-    "lung_lower_lobe_left": "Left Lower Lobe"
+    "lung_lower_lobe_left": "Left Lower Lobe",
+    "rib_cage": "Rib Cage & Skeleton"
 }
 
 ORGAN_COLORS = {
@@ -55,7 +56,8 @@ ORGAN_COLORS = {
     "lung_middle_lobe_right": "#06b6d4",
     "lung_lower_lobe_right": "#14b8a6",
     "lung_upper_lobe_left": "#2dd4bf",
-    "lung_lower_lobe_left": "#10b981"
+    "lung_lower_lobe_left": "#10b981",
+    "rib_cage": "#e2e8f0"
 }
 
 class CTVolumeManager:
@@ -124,6 +126,8 @@ class CTVolumeManager:
             if mask_path.exists():
                 m_img = sitk.ReadImage(str(mask_path))
                 self.masks[organ_id] = sitk.GetArrayFromImage(m_img) # (139, 512, 512) uint8
+            elif organ_id == "rib_cage":
+                self.masks["rib_cage"] = (self.volume >= 220).astype(np.uint8)
             else:
                 logger.warning(f"Mask file {mask_path} not found")
 
@@ -185,9 +189,9 @@ class CTVolumeManager:
         plane = plane.lower()
 
         if mask is None:
-            # Return empty 1x1 mask
-            empty = np.zeros((1, 1), dtype=np.uint8)
-            img = Image.fromarray(empty, mode="L")
+            # Return empty 1x1 transparent mask
+            empty = np.zeros((1, 1, 4), dtype=np.uint8)
+            img = Image.fromarray(empty, mode="RGBA")
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             return buf.getvalue()
@@ -212,7 +216,13 @@ class CTVolumeManager:
             raise ValueError(f"Unknown plane: {plane}")
 
         uint8_mask = (slice_arr > 0).astype(np.uint8) * 255
-        img = Image.fromarray(uint8_mask, mode="L")
+        h, w = uint8_mask.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[..., 0] = 255
+        rgba[..., 1] = 255
+        rgba[..., 2] = 255
+        rgba[..., 3] = uint8_mask
+        img = Image.fromarray(rgba, mode="RGBA")
         buf = io.BytesIO()
         img.save(buf, format="PNG", compress_level=1)
         return buf.getvalue()

@@ -121,6 +121,12 @@ async def get_provider_info():
             "⚠ External API mode: anonymized study context is sent to an external server. "
             "No patient-identifiable data is included."
         ) if is_external else None,
-        custom_llm_configured=bool(os.getenv("CUSTOM_LLM_BASE_URL", "")),
-        api_configured=bool(os.getenv("AI_API_KEY", "")),
+        custom_llm_configured=bool(os.getenv("CUSTOM_LLM_BASE_URL", "") or os.getenv("BASE_URL", "")),
+        api_configured=bool(os.getenv("AI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "") or os.getenv("DEEPSEEK_API_KEY", "")),
     )
+
+
+@router.get("/health")
+async def get_copilot_health():
+    """Health check for AI Co-Pilot engine and active provider."""
+    return copilot_manager.check_health()

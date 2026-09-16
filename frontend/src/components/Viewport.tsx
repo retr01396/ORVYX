@@ -254,6 +254,7 @@ export const Viewport: React.FC<ViewportProps> = ({
                     backgroundColor: color.hex,
                     maskImage: `url(data:image/png;base64,${seg.mask_base64})`,
                     WebkitMaskImage: `url(data:image/png;base64,${seg.mask_base64})`,
+                    maskMode: 'alpha',
                     maskSize: '100% 100%',
                     WebkitMaskSize: '100% 100%',
                     filter: isFocused ? 'brightness(1.4) drop-shadow(0 0 4px rgba(255,255,255,0.6))' : 'none',

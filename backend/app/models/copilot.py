@@ -62,6 +62,12 @@ class AskRequest(BaseModel):
     question: str
     current_view: Optional[str] = "ct"
 
+class CopilotAction(BaseModel):
+    type: Literal["SHOW_STRUCTURE", "FOCUS_STRUCTURE", "FOCUS_FINDING", "NAVIGATE_VIEW"]
+    target_id: Optional[str] = None
+    view: Optional[Literal["xray", "ct", "3d", "reconstruction"]] = None
+    parameters: Optional[Dict[str, Any]] = None
+
 class AskResponse(BaseModel):
     question: str
     intent: str
@@ -69,5 +75,6 @@ class AskResponse(BaseModel):
     highlights: List[str] = Field(default_factory=list)
     relevant_finding_ids: List[str] = Field(default_factory=list)
     target_structure_id: Optional[str] = None
-    target_view: Optional[Literal["xray", "ct"]] = None
+    target_view: Optional[Literal["xray", "ct", "3d", "reconstruction"]] = None
+    actions: List[CopilotAction] = Field(default_factory=list)
     provenance: CoPilotProvenance

@@ -57,3 +57,9 @@ async def health_check():
         "load_duration_s": round(model_manager.load_duration_s, 3)
     }
 
+@app.get("/api/ai/health")
+async def ai_health_check():
+    """Health check endpoint for active AI / LLM Co-Pilot provider."""
+    from app.services.copilot_service import copilot_manager
+    return copilot_manager.check_health()
+

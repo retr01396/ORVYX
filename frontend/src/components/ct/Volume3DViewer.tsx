@@ -28,7 +28,7 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
   onResetFocus,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   // References to Three.js objects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -47,10 +47,18 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
 
   // 1. Initialize Three.js scene
   useEffect(() => {
-    if (!containerRef.current || !canvasRef.current) return;
+    if (!canvasContainerRef.current) return;
 
-    const width = containerRef.current.clientWidth || 400;
-    const height = containerRef.current.clientHeight || 400;
+    const container = canvasContainerRef.current;
+    const width = container.clientWidth || 400;
+    const height = container.clientHeight || 400;
+
+    // Dynamically create canvas element for pristine WebGL context (prevents StrictMode context loss)
+    const canvas = document.createElement('canvas');
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.display = 'block';
+    container.appendChild(canvas);
 
     // Scene
     const scene = new THREE.Scene();
@@ -59,22 +67,22 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
 
     // Camera: FOV 40, looking from Anterior-Superior vantage point
     const camera = new THREE.PerspectiveCamera(40, width / height, 1, 4000);
-    camera.position.set(0, 50, 680);
+    camera.position.set(0, 30, 640);
     cameraRef.current = camera;
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({
-      canvas: canvasRef.current,
+      canvas,
       antialias: true,
       alpha: true,
       powerPreference: 'high-performance',
     });
-    renderer.setSize(width, height);
+    renderer.setSize(width, height, false);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     rendererRef.current = renderer;
 
     // Controls
-    const controls = new OrbitControls(camera, canvasRef.current);
+    const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 150;
@@ -83,23 +91,22 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
     controlsRef.current = controls;
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
     scene.add(ambientLight);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.3);
     dirLight1.position.set(300, 400, 500);
     scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0x94a3b8, 0.8);
+    const dirLight2 = new THREE.DirectionalLight(0x94a3b8, 0.9);
     dirLight2.position.set(-300, -200, -400);
     scene.add(dirLight2);
 
-    const dirLight3 = new THREE.DirectionalLight(0x38bdf8, 0.4);
+    const dirLight3 = new THREE.DirectionalLight(0x38bdf8, 0.5);
     dirLight3.position.set(0, 500, 0);
     scene.add(dirLight3);
 
     // Master Group: Rotate by -90 deg on X so Superior (+Z in LPS) points UP (+Y in Three.js)
-    // LPS coordinates: X: Left/Right, Y: Posterior/Anterior, Z: Superior/Inferior
     const masterGroup = new THREE.Group();
     masterGroup.rotation.x = -Math.PI / 2;
     scene.add(masterGroup);
@@ -109,7 +116,7 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
     const boxEdges = new THREE.EdgesGeometry(boxGeo);
     const boxLine = new THREE.LineSegments(
       boxEdges,
-      new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.6 })
+      new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.7 })
     );
     masterGroup.add(boxLine);
 
@@ -131,17 +138,17 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
     };
     animate();
 
-    // Resize Observer
+    // Resize Observer on canvas container
     const resizeObserver = new ResizeObserver(() => {
-      if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
+      if (!canvasContainerRef.current || !rendererRef.current || !cameraRef.current) return;
+      const w = canvasContainerRef.current.clientWidth;
+      const h = canvasContainerRef.current.clientHeight;
       if (w === 0 || h === 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      rendererRef.current.setSize(w, h, false);
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(container);
 
     // Cleanup
     return () => {
@@ -149,7 +156,9 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
       controls.dispose();
       renderer.dispose();
+      canvas.remove();
       scene.clear();
+      meshesMapRef.current.clear();
     };
   }, []);
 
@@ -163,7 +172,11 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
 
     const loadMeshes = async () => {
       for (const s of structures) {
-        if (meshesMapRef.current.has(s.id)) {
+        const existingMesh = meshesMapRef.current.get(s.id);
+        if (existingMesh) {
+          if (organGroupRef.current && !organGroupRef.current.children.includes(existingMesh)) {
+            organGroupRef.current.add(existingMesh);
+          }
           loaded++;
           if (isMounted) setLoadedCount(loaded);
           continue;
@@ -192,14 +205,15 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
             geometry.setIndex(data.indices);
           }
 
+          const isSkeleton = s.group === 'Skeletal';
           const material = new THREE.MeshStandardMaterial({
             color: new THREE.Color(s.color),
-            roughness: 0.35,
-            metalness: 0.15,
-            transparent: true,
+            roughness: isSkeleton ? 0.45 : 0.35,
+            metalness: isSkeleton ? 0.05 : 0.15,
+            transparent: opacity < 0.99,
             opacity: opacity,
             side: THREE.DoubleSide,
-            depthWrite: opacity > 0.85,
+            depthWrite: opacity > 0.6,
           });
 
           const mesh = new THREE.Mesh(geometry, material);
@@ -438,10 +452,8 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
         Left (L)
       </div>
 
-      {/* WebGL Canvas */}
-      <div className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing">
-        <canvas ref={canvasRef} className="w-full h-full block" />
-      </div>
+      {/* WebGL Canvas Container */}
+      <div ref={canvasContainerRef} className="flex-1 w-full min-h-0 relative cursor-grab active:cursor-grabbing overflow-hidden" />
 
       {/* Footer Navigation Hints */}
       <div className="h-6 bg-slate-900/90 px-3 flex items-center justify-between text-[10px] text-slate-400 font-mono border-t border-slate-800 z-20">

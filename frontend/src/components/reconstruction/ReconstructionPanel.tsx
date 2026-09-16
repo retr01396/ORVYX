@@ -35,6 +35,7 @@ interface ReconstructionPanelProps {
   highlightedStructureIds: string[];
   elevatedFindings: Finding[];
   studyTitle?: string;
+  studyImageUrl?: string | null;
 }
 
 export const ReconstructionPanel: React.FC<ReconstructionPanelProps> = ({
@@ -46,17 +47,18 @@ export const ReconstructionPanel: React.FC<ReconstructionPanelProps> = ({
   highlightedStructureIds,
   elevatedFindings,
   studyTitle,
+  studyImageUrl,
 }) => {
   const currentStepIdx = PHASE_ORDER.indexOf(phase === 'idle' ? 'analyzing' : phase);
 
   return (
     <aside
-      className="w-56 shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col overflow-hidden"
+      className="w-64 shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col overflow-hidden select-none"
       role="complementary"
       aria-label="3D Reconstruction Progress Panel"
     >
       {/* Header */}
-      <div className="px-3 py-3 border-b border-slate-800">
+      <div className="px-3.5 py-3 border-b border-slate-800">
         <h2 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
           3D Reconstruction
         </h2>
@@ -65,8 +67,28 @@ export const ReconstructionPanel: React.FC<ReconstructionPanelProps> = ({
         )}
       </div>
 
+      {/* 2D X-Ray Thumbnail Card */}
+      {studyImageUrl && (
+        <div className="p-3 border-b border-slate-800 bg-black/40">
+          <div className="relative rounded-lg overflow-hidden border border-slate-700/80 bg-black aspect-square shadow-md group">
+            <img
+              src={studyImageUrl}
+              alt="Frontal Chest Radiograph"
+              className="w-full h-full object-contain filter contrast-105"
+            />
+            <div className="absolute top-1.5 left-1.5 bg-slate-950/80 px-1.5 py-0.5 rounded text-[9px] font-mono text-cyan-300 font-bold border border-cyan-500/40 shadow">
+              R
+            </div>
+            <div className="absolute bottom-1.5 left-1.5 right-1.5 bg-slate-950/85 px-1.5 py-0.5 rounded text-[9px] font-mono text-slate-300 border border-slate-800 flex items-center justify-between">
+              <span>2D X-Ray</span>
+              <span className="text-slate-400">CHEST PA</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Disclaimer */}
-      <div className="mx-3 mt-2 flex items-start gap-1.5 bg-amber-950/40 border border-amber-700/40 p-2 rounded-md">
+      <div className="mx-3 mt-2.5 flex items-start gap-1.5 bg-amber-950/40 border border-amber-700/40 p-2 rounded-md">
         <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" aria-hidden="true" />
         <p className="text-[9px] text-amber-300 leading-relaxed">
           <strong>AI-ESTIMATED</strong> template anatomy — not patient-specific CT data

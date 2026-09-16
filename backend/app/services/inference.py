@@ -173,8 +173,14 @@ class ModelManager:
 
     @staticmethod
     def _mask_to_base64_png(mask_arr: np.ndarray) -> str:
-        """Converts [H, W] uint8 grayscale mask to PNG base64 string."""
-        img = Image.fromarray(mask_arr, mode='L')
+        """Converts [H, W] uint8 binary mask (0 or 255) to PNG base64 string with alpha transparency."""
+        h, w = mask_arr.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[..., 0] = 255
+        rgba[..., 1] = 255
+        rgba[..., 2] = 255
+        rgba[..., 3] = mask_arr
+        img = Image.fromarray(rgba, mode='RGBA')
         buffer = io.BytesIO()
         img.save(buffer, format='PNG', optimize=True)
         return base64.b64encode(buffer.getvalue()).decode('utf-8')

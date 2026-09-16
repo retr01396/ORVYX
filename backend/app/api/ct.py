@@ -9,11 +9,12 @@ router = APIRouter(prefix="/api/ct", tags=["ct"])
 # Allowlists for strict parameter validation
 _VALID_PLANES = frozenset({"axial", "coronal", "sagittal"})
 _VALID_WINDOWS = frozenset({"lung", "mediastinum"})
-_VALID_STRUCTURES = frozenset({
+_VALID_MASK_STRUCTURES = frozenset({
     "heart", "aorta", "trachea",
     "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right",
     "lung_upper_lobe_left", "lung_lower_lobe_left",
 })
+_VALID_STRUCTURES = _VALID_MASK_STRUCTURES | {"rib_cage"}
 
 
 @router.get("/study")
@@ -69,10 +70,10 @@ async def get_ct_mask_slice(
     index: int = Query(..., ge=0, description="Slice coordinate index")
 ):
     """Returns 2D binary segmentation mask slice matching the corresponding CT slice geometry."""
-    if structure not in _VALID_STRUCTURES:
+    if structure not in _VALID_MASK_STRUCTURES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown structure '{structure}'. Valid structures: {', '.join(sorted(_VALID_STRUCTURES))}."
+            detail=f"Unknown structure '{structure}'. Valid structures: {', '.join(sorted(_VALID_MASK_STRUCTURES))}."
         )
     if plane not in _VALID_PLANES:
         raise HTTPException(

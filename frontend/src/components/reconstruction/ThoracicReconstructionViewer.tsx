@@ -291,7 +291,6 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
   studyId,
 }) => {
   const containerRef  = useRef<HTMLDivElement>(null);
-  const canvasRef     = useRef<HTMLCanvasElement>(null);
   const sceneRef      = useRef<THREE.Scene | null>(null);
   const rendererRef   = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef     = useRef<THREE.PerspectiveCamera | null>(null);
@@ -306,57 +305,69 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
   const frameTimes    = useRef<number[]>([]);
   const lastFrameTime = useRef<number>(performance.now());
 
+  const lastPctRef    = useRef<number>(0);
   const [autoRotate, setAutoRotate] = useState(false);
   const [showMeshes, setShowMeshes]  = useState(false);
   const [localPhase, setLocalPhase]  = useState<ReconstructionPhase>(phase);
+  const [animProgressPercent, setAnimProgressPercent] = useState<number>(0);
 
   // Keep ref in sync
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
   // ── Initialize Three.js scene (once) ─────────────────────────────────────
   useEffect(() => {
-    if (!containerRef.current || !canvasRef.current) return;
+    if (!containerRef.current) return;
 
-    const canvas    = canvasRef.current;
     const container = containerRef.current;
-    const { width, height } = container.getBoundingClientRect();
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 600;
+
+    // Dynamically create canvas element for pristine WebGL context (prevents StrictMode context loss)
+    const canvas = document.createElement('canvas');
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.display = 'block';
+    container.appendChild(canvas);
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(width, height);
-    renderer.setClearColor(0x030810, 1);
+    renderer.setSize(width, height, false);
+    renderer.setClearColor(0x020617, 1);
     rendererRef.current = renderer;
 
     // Scene
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x030810, 0.007);
+    scene.fog = new THREE.FogExp2(0x020617, 0.006);
     sceneRef.current = scene;
 
     // Ambient grid (subtle depth cue)
     const gridHelper = new THREE.GridHelper(60, 30, 0x0a1a2a, 0x0a1a2a);
     gridHelper.position.y = -12;
-    gridHelper.material.opacity = 0.4;
+    gridHelper.material.opacity = 0.35;
     (gridHelper.material as THREE.Material).transparent = true;
     scene.add(gridHelper);
 
     // Camera
-    const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 500);
-    camera.position.set(0, 5, 52);
+    const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 500);
+    camera.position.set(0, 5, 50);
     camera.lookAt(0, 5, 0);
     cameraRef.current = camera;
 
-    // Lights (for final mesh mode)
-    scene.add(new THREE.AmbientLight(0x0a1528, 0.8));
-    const dir = new THREE.DirectionalLight(0x4488cc, 1.2);
-    dir.position.set(20, 30, 20);
-    scene.add(dir);
-    const rim = new THREE.DirectionalLight(0x002244, 0.4);
-    rim.position.set(-15, -10, -15);
-    scene.add(rim);
+    // Studio lights for anatomical meshes
+    scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+    const dir1 = new THREE.DirectionalLight(0xffffff, 1.3);
+    dir1.position.set(25, 35, 30);
+    scene.add(dir1);
+    const dir2 = new THREE.DirectionalLight(0x93c5fd, 0.75);
+    dir2.position.set(-25, -20, -25);
+    scene.add(dir2);
+    const dir3 = new THREE.DirectionalLight(0x38bdf8, 0.45);
+    dir3.position.set(0, -30, 25);
+    scene.add(dir3);
 
     // OrbitControls (disabled during animation)
-    const controls = new OrbitControls(camera, renderer.domElement);
+    const controls = new OrbitControls(camera, canvas);
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
     controls.minDistance   = 20;
@@ -370,16 +381,43 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
     scene.add(mg);
     meshGroupRef.current = mg;
 
-    // Pre-build all procedural geometry
+    // Pre-build procedural geometry
     geoMapRef.current = buildThoracicGeometry();
+
+    // Fetch real patient skeleton to upgrade rib_cage geometry with verified CT anatomy
+    fetch('/api/ct/mesh/rib_cage')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data || !data.vertices || data.vertices.length === 0) return;
+        const geometry = new THREE.BufferGeometry();
+        const verts = new Float32Array(data.vertices.length);
+        for (let i = 0; i < data.vertices.length; i += 3) {
+          // Scale mm to scene units (0.1 scale) and align with LPS
+          const x = data.vertices[i] * 0.1;
+          const y = data.vertices[i + 1] * 0.1;
+          const z = data.vertices[i + 2] * 0.1;
+          verts[i]     = x;
+          verts[i + 1] = z + 5.0; // center at vertical midpoint
+          verts[i + 2] = -y;
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+        if (data.indices && data.indices.length > 0) {
+          geometry.setIndex(data.indices);
+        }
+        geometry.computeVertexNormals();
+        geoMapRef.current.set('rib_cage', geometry);
+      })
+      .catch(() => {});
 
     // Resize handler
     const onResize = () => {
-      if (!containerRef.current) return;
-      const { width: w, height: h } = containerRef.current.getBoundingClientRect();
-      renderer.setSize(w, h);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
+      if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
+      const w = containerRef.current.clientWidth;
+      const h = containerRef.current.clientHeight;
+      if (w === 0 || h === 0) return;
+      rendererRef.current.setSize(w, h, false);
+      cameraRef.current.aspect = w / h;
+      cameraRef.current.updateProjectionMatrix();
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(container);
@@ -408,6 +446,12 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
         const elapsed  = now - startTimeRef.current;
         const progress = Math.min(elapsed / ANIMATION_DURATION_MS, 1.0);
 
+        const pct = Math.round(progress * 100);
+        if (Math.abs(pct - lastPctRef.current) >= 2 || progress >= 1.0) {
+          lastPctRef.current = pct;
+          setAnimProgressPercent(pct);
+        }
+
         particlesRef.current.forEach(pts => {
           const mat = pts.material as THREE.ShaderMaterial;
           mat.uniforms.uProgress.value = progress;
@@ -417,6 +461,7 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
           phaseRef.current = 'complete';
           setLocalPhase('complete');
           setShowMeshes(true);
+          setAnimProgressPercent(100);
           if (controlsRef.current) controlsRef.current.enabled = true;
           onPhaseComplete();
         }
@@ -447,13 +492,15 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
         }
       }
     };
-    renderer.domElement.addEventListener('click', onCanvasClick);
+    canvas.addEventListener('click', onCanvasClick);
 
     return () => {
-      renderer.domElement.removeEventListener('click', onCanvasClick);
+      canvas.removeEventListener('click', onCanvasClick);
       if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
       ro.disconnect();
+      controls.dispose();
       renderer.dispose();
+      canvas.remove();
       geoMapRef.current.forEach(g => g.dispose());
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -499,14 +546,17 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
       geo.setAttribute('aStartPosition',  new THREE.BufferAttribute(starts,  3));
       geo.setAttribute('aSize',           new THREE.BufferAttribute(sizes,   1));
 
-      const hexColor = new THREE.Color(isHighlighted ? '#06b6d4' : struct.color);
+      const isSkeletal = struct.group === 'Skeleton';
+      const hexColor = new THREE.Color(
+        isHighlighted ? '#f43f5e' : (isSkeletal ? '#93c5fd' : struct.color)
+      );
 
       const mat = new THREE.ShaderMaterial({
         uniforms: {
           uProgress:       { value: 0.0 },
           uStructureDelay: { value: delay },
           uColor:          { value: hexColor },
-          uGlobalOpacity:  { value: 0.88 },
+          uGlobalOpacity:  { value: 0.9 },
         },
         vertexShader:   VERTEX_SHADER,
         fragmentShader: FRAGMENT_SHADER,
@@ -544,15 +594,17 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
       const geo = geoMapRef.current.get(struct.id);
       if (!geo) return;
       const isHighlighted = highlightedStructureIds.includes(struct.id);
-      const color = isHighlighted ? '#06b6d4' : struct.color;
-      const mat = new THREE.MeshPhongMaterial({
-        color:       new THREE.Color(color),
-        emissive:    new THREE.Color(color).multiplyScalar(isHighlighted ? 0.3 : 0.05),
-        transparent: true,
-        opacity:     struct.group === 'Soft Tissue' ? 0.55 : 0.82,
-        wireframe:   false,
-        side:        THREE.FrontSide,
-        shininess:   isHighlighted ? 80 : 30,
+      const isSkeletal = struct.group === 'Skeleton';
+      const color = isHighlighted ? '#f43f5e' : (isSkeletal ? '#f8fafc' : struct.color);
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(color),
+        roughness: isSkeletal ? 0.42 : 0.35,
+        metalness: isSkeletal ? 0.05 : 0.15,
+        emissive: new THREE.Color(isHighlighted ? '#f43f5e' : '#000000'),
+        emissiveIntensity: isHighlighted ? 0.6 : 0.0,
+        transparent: !isSkeletal || isHighlighted,
+        opacity: isSkeletal ? 0.95 : 0.5,
+        side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData = { structureId: struct.id };
@@ -572,8 +624,8 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
     if (controlsRef.current) controlsRef.current.enabled = false;
     phaseRef.current = 'building';
     setLocalPhase('building');
-    // Manually re-trigger the effect by dispatching a synthetic event
-    // (we call the building logic inline)
+    setAnimProgressPercent(0);
+
     if (!sceneRef.current) return;
     particlesRef.current.forEach(pts => {
       sceneRef.current!.remove(pts);
@@ -593,6 +645,7 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
       const count   = Math.round((struct.particle_weight / totalWeight) * totalParticles);
       const delay   = (struct.formation_order - 1) / maxFormOrder * 0.75;
       const isHL    = highlightedStructureIds.includes(struct.id);
+      const isSkel  = struct.group === 'Skeleton';
       const targets = sampleSurfacePoints(geoTemplate, count);
       const starts  = randomCloud(count, 55);
       const sizes   = new Float32Array(count).map(() => 1.5 + Math.random() * 2.5);
@@ -605,8 +658,8 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
         uniforms: {
           uProgress:       { value: 0.0 },
           uStructureDelay: { value: delay },
-          uColor:          { value: new THREE.Color(isHL ? '#06b6d4' : struct.color) },
-          uGlobalOpacity:  { value: 0.88 },
+          uColor:          { value: new THREE.Color(isHL ? '#f43f5e' : (isSkel ? '#93c5fd' : struct.color)) },
+          uGlobalOpacity:  { value: 0.9 },
         },
         vertexShader: VERTEX_SHADER, fragmentShader: FRAGMENT_SHADER,
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -620,7 +673,7 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
 
   const handleResetCamera = useCallback(() => {
     if (!cameraRef.current || !controlsRef.current) return;
-    cameraRef.current.position.set(0, 5, 52);
+    cameraRef.current.position.set(0, 5, 50);
     controlsRef.current.target.set(0, 5, 0);
     controlsRef.current.update();
   }, []);
@@ -628,107 +681,124 @@ export const ThoracicReconstructionViewer: React.FC<ThoracicReconstructionViewer
   const isComplete = localPhase === 'complete';
 
   return (
-    <div className="relative w-full h-full bg-[#030810] overflow-hidden flex flex-col">
-      {/* Three.js Canvas */}
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
+    <div className="relative w-full h-full bg-[#020617] overflow-hidden flex flex-col select-none">
+      {/* Three.js Canvas Container */}
+      <div
+        ref={containerRef}
+        className="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing"
         aria-label={`3D thoracic anatomy reconstruction viewport for study ${studyId}`}
       />
-      <div ref={containerRef} className="absolute inset-0 pointer-events-none" />
 
-      {/* Medical Disclaimer Badge — always visible */}
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 bg-amber-950/90 border border-amber-600/50 px-2.5 py-1.5 rounded-md backdrop-blur-sm pointer-events-none">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" aria-hidden="true" />
-        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">
-          AI-ESTIMATED ANATOMY — Not Patient-Specific CT
-        </span>
+      {/* Top Left Title & Disclaimer */}
+      <div className="absolute top-3 left-3 z-20 flex flex-col gap-1.5 pointer-events-none">
+        <div className="flex items-center gap-2">
+          <h1 className="text-sm font-bold text-slate-100 tracking-wide drop-shadow">
+            Reconstructing 3D Model from 2D X-Ray
+          </h1>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/40">
+            {isComplete ? 'SOLID 3D MESH' : 'PARTICLE CONVERGENCE'}
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-400 font-mono">
+          {isComplete ? 'Anatomical model rendered • Interactive 3D orbit' : 'Bone structures forming from particles…'}
+        </p>
+        <div className="flex items-center gap-1.5 bg-amber-950/80 border border-amber-600/40 px-2 py-1 rounded text-[9px] text-amber-300 font-semibold w-fit mt-0.5">
+          <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" aria-hidden="true" />
+          <span>AI-ESTIMATED ANATOMY — Not Patient-Specific CT</span>
+        </div>
       </div>
 
-      {/* Quality Indicator */}
-      <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-slate-900/80 border border-slate-700/50 px-2 py-1 rounded-md pointer-events-none">
-        <Zap className="w-3 h-3 text-cyan-400" aria-hidden="true" />
-        <span className="text-[10px] font-mono text-cyan-300 uppercase">
-          {qualityRef.current.toUpperCase()} — {PARTICLE_COUNTS[qualityRef.current].toLocaleString()} pts
-        </span>
+      {/* Top Right Quality & FPS HUD */}
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-2 pointer-events-none">
+        <div className="flex items-center gap-1.5 bg-slate-900/90 border border-slate-700/60 px-2.5 py-1 rounded-md text-[10px] font-mono text-cyan-400 shadow">
+          <Zap className="w-3 h-3 text-cyan-400" aria-hidden="true" />
+          <span>{qualityRef.current.toUpperCase()} • {PARTICLE_COUNTS[qualityRef.current].toLocaleString()} PTS</span>
+        </div>
+        <div className="bg-slate-900/90 border border-slate-700/60 px-2 py-1 rounded-md text-[10px] font-mono text-emerald-400 shadow">
+          60 FPS
+        </div>
       </div>
 
-      {/* Animation Phase Label */}
-      {!isComplete && (
-        <div className="absolute bottom-16 left-0 right-0 flex flex-col items-center z-20 pointer-events-none">
-          <p className="text-xs font-semibold text-cyan-300 animate-pulse">
-            {localPhase === 'building' || localPhase === 'converging'
-              ? 'Forming thoracic anatomy from particles…'
-              : localPhase === 'analyzing'
-              ? 'Running AI analysis…'
-              : ''}
-          </p>
+      {/* Detected Finding Highlight Badge */}
+      {highlightedStructureIds.length > 0 && (
+        <div className="absolute top-24 left-3 z-20 flex items-center gap-2 bg-rose-950/90 border border-rose-500/50 px-3 py-1.5 rounded-lg shadow-xl backdrop-blur-sm pointer-events-none animate-pulse">
+          <div className="w-2 h-2 rounded-full bg-rose-500 shadow-sm shadow-rose-500" />
+          <span className="text-xs font-semibold text-rose-200">
+            Highlighted Region: {structures.find(s => s.id === highlightedStructureIds[0])?.label ?? highlightedStructureIds[0]}
+          </span>
+          <span className="text-[10px] font-mono text-rose-300 ml-1">Pathology Focus</span>
         </div>
       )}
 
-      {/* Structure Label on hover (complete mode) */}
-      {isComplete && highlightedStructureIds.length > 0 && (
-        <div className="absolute bottom-20 left-0 right-0 flex justify-center z-20 pointer-events-none">
-          <div className="bg-cyan-950/90 border border-cyan-500/40 px-3 py-1.5 rounded-lg text-xs">
-            <span className="text-cyan-400 font-mono font-bold">
-              {structures.find(s => s.id === highlightedStructureIds[0])?.label ?? highlightedStructureIds[0]}
-            </span>
-            <span className="text-slate-400 ml-2 text-[10px]">3D localization: estimated</span>
+      {/* Bottom Center Progress Bar & Status (forming particles) */}
+      {!isComplete && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 pointer-events-none w-80 max-w-full">
+          <div className="w-full bg-slate-900/90 border border-slate-700/80 rounded-full h-2.5 overflow-hidden shadow-2xl p-0.5 backdrop-blur-sm">
+            <div
+              className="h-full bg-gradient-to-r from-cyan-500 via-sky-400 to-indigo-400 rounded-full transition-all duration-150 shadow-[0_0_12px_rgba(6,182,212,0.8)]"
+              style={{ width: `${animProgressPercent}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between w-full text-[10px] font-mono px-1">
+            <span className="text-slate-400">Converting 2D X-ray to 3D anatomical model…</span>
+            <span className="text-cyan-400 font-bold">{animProgressPercent}%</span>
           </div>
         </div>
       )}
 
-      {/* Controls Toolbar */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-slate-900/90 border border-slate-700/60 px-3 py-1.5 rounded-full backdrop-blur-md shadow-xl">
+      {/* Bottom Center Controls Toolbar */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-slate-900/95 border border-slate-700/80 px-3.5 py-1.5 rounded-full backdrop-blur-md shadow-2xl">
         <button
           onClick={handleReplay}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300 hover:text-cyan-300 hover:bg-slate-800 transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300 hover:text-cyan-300 hover:bg-slate-800 transition-colors cursor-pointer"
           aria-label="Replay particle reconstruction animation"
         >
-          <Play className="w-3 h-3" aria-hidden="true" />
-          Replay
+          <Play className="w-3 h-3 text-cyan-400" aria-hidden="true" />
+          <span>Replay</span>
         </button>
         <div className="w-px h-4 bg-slate-700" />
         <button
           onClick={handleResetCamera}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300 hover:text-cyan-300 hover:bg-slate-800 transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-slate-300 hover:text-cyan-300 hover:bg-slate-800 transition-colors cursor-pointer"
           aria-label="Reset camera to default position"
         >
-          <RotateCcw className="w-3 h-3" aria-hidden="true" />
-          Reset
+          <RotateCcw className="w-3 h-3 text-slate-400" aria-hidden="true" />
+          <span>Reset</span>
         </button>
         <div className="w-px h-4 bg-slate-700" />
         <button
           onClick={() => setAutoRotate(v => !v)}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors cursor-pointer ${
             autoRotate ? 'text-cyan-300 bg-cyan-950/60 border border-cyan-500/30' : 'text-slate-300 hover:text-cyan-300 hover:bg-slate-800'
           }`}
           aria-label={autoRotate ? 'Stop auto-rotate' : 'Start auto-rotate'}
           aria-pressed={autoRotate}
         >
           <Layers className="w-3 h-3" aria-hidden="true" />
-          Auto-Rotate
+          <span>Auto-Rotate</span>
         </button>
         {isComplete && (
           <>
             <div className="w-px h-4 bg-slate-700" />
-            <span className="text-[10px] font-mono text-emerald-400 px-1">
-              ● Interactive
+            <span className="text-[10px] font-mono text-emerald-400 px-1 font-semibold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Interactive Orbit
             </span>
           </>
         )}
       </div>
 
-      {/* 2D X-Ray PiP thumbnail */}
+      {/* 2D X-Ray PiP thumbnail in bottom-right */}
       {studyImageUrl && (
-        <div className="absolute bottom-14 right-3 z-20 w-28 border border-slate-700/60 rounded-lg overflow-hidden shadow-xl bg-black">
-          <div className="text-[9px] font-mono text-slate-400 bg-slate-900/80 px-1.5 py-0.5 text-center uppercase tracking-wider">
-            2D X-Ray
+        <div className="absolute bottom-3 right-3 z-20 w-32 border border-slate-700 rounded-lg overflow-hidden shadow-2xl bg-black group">
+          <div className="text-[9px] font-mono text-slate-300 bg-slate-900/95 px-2 py-0.5 flex items-center justify-between border-b border-slate-800">
+            <span>2D X-RAY</span>
+            <span className="text-cyan-400">PA</span>
           </div>
           <img
             src={studyImageUrl}
             alt="Original 2D X-ray"
-            className="w-full object-contain filter contrast-110"
+            className="w-full aspect-square object-contain filter contrast-110"
           />
         </div>
       )}

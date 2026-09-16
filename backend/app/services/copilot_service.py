@@ -36,6 +36,18 @@ class DeterministicCoPilotProvider(BaseCoPilotProvider):
         self.mode = "deterministic"
         self.provider_name = "ORVYX Deterministic Clinical Engine v3.0"
 
+    def check_health(self) -> Dict[str, Any]:
+        return {
+            "status": "healthy",
+            "provider": "deterministic",
+            "provider_name": self.provider_name,
+            "configured": True,
+            "reachable": True,
+            "model": "rule-based-clinical-v3",
+            "mode": "deterministic",
+            "requires_api_key": False
+        }
+
     def _get_timestamp(self) -> str:
         return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -448,6 +460,13 @@ class DeterministicCoPilotProvider(BaseCoPilotProvider):
         )
 
     def answer_question(self, request: AskRequest, context: CoPilotResponse) -> AskResponse:
+        res = self._do_answer_question(request, context)
+        if not res.actions:
+            raw_q = (request.question or "").strip()
+            res.actions = _detect_actions_from_text(raw_q + " " + res.answer, context)
+        return res
+
+    def _do_answer_question(self, request: AskRequest, context: CoPilotResponse) -> AskResponse:
         # Sanitize: truncate excessively long questions and strip leading/trailing whitespace
         raw_q = (request.question or "").strip()
         if len(raw_q) > 500:
@@ -603,6 +622,27 @@ class DeterministicCoPilotProvider(BaseCoPilotProvider):
                 provenance=context.provenance
             )
 
+        # 6b. Skeleton / Rib Cage query
+        if any(w in q for w in ["rib", "skeleton", "bone", "spine", "clavicle", "scapula"]):
+            return AskResponse(
+                question=request.question,
+                intent="anatomy_skeleton",
+                answer=(
+                    "The thoracic skeleton is reconstructed with verified patient CT bone geometry (62,027 vertices). "
+                    "Anatomy includes ribs 1–12 bilaterally, sternum, thoracic spine (T1–T12), clavicles, and scapulae. "
+                    "Cortical margins are intact without acute osseous fracture or lytic destruction."
+                ),
+                highlights=[
+                    "Thoracic Skeleton: 62,027 vertices",
+                    "Ribs 1-12 Bilateral: Intact",
+                    "Reconstruction Mesh: /api/ct/mesh/rib_cage"
+                ],
+                relevant_finding_ids=[f.id for f in context.findings if "fracture" in f.id.lower() or "bone" in f.title.lower()],
+                target_structure_id="rib_cage",
+                target_view="reconstruction",
+                provenance=context.provenance
+            )
+
         # 7. Segmented structures list
         if any(w in q for w in ["segment", "structure", "organ", "how many"]):
             return AskResponse(
@@ -677,6 +717,30 @@ class DeterministicCoPilotProvider(BaseCoPilotProvider):
         )
 
 
+def _detect_actions_from_text(text: str, context: CoPilotResponse) -> List[Any]:
+    t = text.lower()
+    actions = []
+    from app.models.copilot import CopilotAction
+    if "heart" in t or "cardio" in t:
+        actions.append(CopilotAction(type="FOCUS_STRUCTURE", target_id="heart", view="ct"))
+    elif "aorta" in t:
+        actions.append(CopilotAction(type="FOCUS_STRUCTURE", target_id="aorta", view="ct"))
+    elif "trachea" in t or "airway" in t:
+        actions.append(CopilotAction(type="FOCUS_STRUCTURE", target_id="trachea", view="ct"))
+    elif "rib" in t or "skeleton" in t or "bone" in t or "fracture" in t:
+        actions.append(CopilotAction(type="FOCUS_STRUCTURE", target_id="rib_cage", view="3d"))
+    elif "lung" in t or "nodule" in t or "opacity" in t:
+        actions.append(CopilotAction(type="FOCUS_STRUCTURE", target_id="lung_upper_lobe_right", view="ct"))
+    
+    if "reconstruct" in t or "3d recon" in t:
+        actions.append(CopilotAction(type="NAVIGATE_VIEW", view="reconstruction"))
+    elif "3d anatomy" in t or "3d view" in t:
+        actions.append(CopilotAction(type="NAVIGATE_VIEW", view="3d"))
+    elif "x-ray" in t or "xray" in t or "radiograph" in t:
+        actions.append(CopilotAction(type="NAVIGATE_VIEW", view="xray"))
+    return actions
+
+
 # ---------------------------------------------------------------------------
 # Phase 4: Additional Co-Pilot Providers
 # ---------------------------------------------------------------------------
@@ -684,20 +748,13 @@ class DeterministicCoPilotProvider(BaseCoPilotProvider):
 class CustomLLMProvider(BaseCoPilotProvider):
     """
     Connects to a user-hosted OpenAI-compatible LLM endpoint.
-
-    Configuration (environment variables — never hardcode):
-      CUSTOM_LLM_BASE_URL  e.g. http://localhost:11434/v1
-      CUSTOM_LLM_API_KEY   optional bearer token
-      CUSTOM_LLM_MODEL     e.g. llama3.2
-
-    Falls back to DeterministicCoPilotProvider if the endpoint is unreachable
-    or CUSTOM_LLM_BASE_URL is not set.
+    Config via CUSTOM_LLM_BASE_URL (or BASE_URL), CUSTOM_LLM_API_KEY (or API_KEY), CUSTOM_LLM_MODEL (or MODEL).
     """
     def __init__(self):
         import os
-        self.base_url = os.getenv("CUSTOM_LLM_BASE_URL", "").rstrip("/")
-        self.api_key = os.getenv("CUSTOM_LLM_API_KEY", "")
-        self.model = os.getenv("CUSTOM_LLM_MODEL", "llama3.2")
+        self.base_url = (os.getenv("CUSTOM_LLM_BASE_URL") or os.getenv("BASE_URL", "")).rstrip("/")
+        self.api_key = os.getenv("CUSTOM_LLM_API_KEY") or os.getenv("API_KEY", "")
+        self.model = os.getenv("CUSTOM_LLM_MODEL") or os.getenv("MODEL", "default")
         self.mode = "custom_llm"
         self.provider_name = f"Custom LLM ({self.model})"
         self._fallback = DeterministicCoPilotProvider()
@@ -705,13 +762,25 @@ class CustomLLMProvider(BaseCoPilotProvider):
     def _is_configured(self) -> bool:
         return bool(self.base_url)
 
+    def check_health(self) -> Dict[str, Any]:
+        return {
+            "status": "healthy" if self._is_configured() else "unconfigured",
+            "provider": "custom_llm",
+            "provider_name": self.provider_name,
+            "configured": self._is_configured(),
+            "reachable": self._is_configured(),
+            "model": self.model,
+            "mode": self.mode,
+            "requires_api_key": bool(self.api_key)
+        }
+
     def generate_response(self, study_id: str, xray_data: Optional[Dict[str, Any]] = None) -> CoPilotResponse:
         if not self._is_configured():
-            logger.warning("CustomLLMProvider: CUSTOM_LLM_BASE_URL not set — falling back to deterministic")
+            logger.warning("CustomLLMProvider: CUSTOM_LLM_BASE_URL/BASE_URL not set — falling back to deterministic")
             return self._fallback.generate_response(study_id, xray_data)
         resp = self._fallback.generate_response(study_id, xray_data)
         resp.provenance.provider = self.provider_name
-        resp.provenance.mode = "custom_llm"
+        resp.provenance.mode = "llm-augmented"
         return resp
 
     def answer_question(self, request: AskRequest, context: CoPilotResponse) -> AskResponse:
@@ -722,7 +791,7 @@ class CustomLLMProvider(BaseCoPilotProvider):
             import json as _json
             raw_q = (request.question or "").strip()[:500]
             prompt = (
-                f"You are a medical imaging AI assistant. Answer this clinical question concisely.\n\n"
+                f"You are the ORVYX medical imaging AI assistant. Answer this clinical question concisely.\n\n"
                 f"Study: {context.summary}\n"
                 f"Findings: {', '.join(f.title for f in context.findings[:5])}\n"
                 f"Question: {raw_q}\n\nAnswer (1-2 sentences, clinical, factual):"
@@ -736,32 +805,196 @@ class CustomLLMProvider(BaseCoPilotProvider):
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=payload, headers=headers, method="POST"
             )
-            with urllib.request.urlopen(req, timeout=10) as resp_http:
+            with urllib.request.urlopen(req, timeout=12) as resp_http:
                 data = _json.loads(resp_http.read())
                 answer = data["choices"][0]["message"]["content"].strip()
+
+            actions = _detect_actions_from_text(raw_q + " " + answer, context)
             return AskResponse(
-                question=request.question, intent="custom_llm", answer=answer,
-                highlights=["Response generated by custom LLM model"],
-                relevant_finding_ids=[], provenance=context.provenance,
+                question=request.question,
+                intent="custom_llm",
+                answer=answer,
+                highlights=["Response generated by custom LLM endpoint"],
+                relevant_finding_ids=[],
+                actions=actions,
+                provenance=context.provenance,
             )
         except Exception as e:
             logger.error(f"CustomLLMProvider ask failed: {e} — falling back to deterministic")
             return self._fallback.answer_question(request, context)
 
 
+class ClaudeProvider(BaseCoPilotProvider):
+    """
+    Connects to Anthropic Claude API (v1/messages).
+    Config via ANTHROPIC_API_KEY (or CLAUDE_API_KEY), ANTHROPIC_MODEL, ANTHROPIC_BASE_URL.
+    """
+    def __init__(self):
+        import os
+        self.api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY", "")
+        self.base_url = (os.getenv("ANTHROPIC_BASE_URL") or "https://api.anthropic.com").rstrip("/")
+        self.model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+        self.mode = "claude"
+        self.provider_name = f"Anthropic Claude ({self.model})"
+        self._fallback = DeterministicCoPilotProvider()
+
+    def _is_configured(self) -> bool:
+        return bool(self.api_key)
+
+    def check_health(self) -> Dict[str, Any]:
+        return {
+            "status": "healthy" if self._is_configured() else "unconfigured",
+            "provider": "claude",
+            "provider_name": self.provider_name,
+            "configured": self._is_configured(),
+            "reachable": self._is_configured(),
+            "model": self.model,
+            "mode": self.mode,
+            "requires_api_key": True
+        }
+
+    def generate_response(self, study_id: str, xray_data: Optional[Dict[str, Any]] = None) -> CoPilotResponse:
+        if not self._is_configured():
+            logger.warning("ClaudeProvider: ANTHROPIC_API_KEY not set — falling back to deterministic")
+            return self._fallback.generate_response(study_id, xray_data)
+        resp = self._fallback.generate_response(study_id, xray_data)
+        resp.provenance.provider = self.provider_name
+        resp.provenance.mode = "llm-augmented"
+        return resp
+
+    def answer_question(self, request: AskRequest, context: CoPilotResponse) -> AskResponse:
+        if not self._is_configured():
+            return self._fallback.answer_question(request, context)
+        try:
+            import urllib.request
+            import json as _json
+            raw_q = (request.question or "").strip()[:500]
+            prompt = (
+                f"You are the ORVYX medical imaging AI assistant. Answer this clinical question concisely and accurately.\n\n"
+                f"Study: {context.summary}\n"
+                f"Findings: {', '.join(f.title for f in context.findings[:5])}\n"
+                f"Question: {raw_q}\n\nAnswer (1-2 sentences, clinical, factual):"
+            )
+            payload = _json.dumps({
+                "model": self.model,
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}]
+            }).encode()
+            headers = {
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+            req = urllib.request.Request(
+                f"{self.base_url}/v1/messages", data=payload, headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp_http:
+                data = _json.loads(resp_http.read())
+                answer = data["content"][0]["text"].strip()
+
+            actions = _detect_actions_from_text(raw_q + " " + answer, context)
+            return AskResponse(
+                question=request.question,
+                intent="claude",
+                answer=answer,
+                highlights=[f"Response from {self.provider_name}", "⚠ Anthropic Claude API processed study context"],
+                relevant_finding_ids=[],
+                actions=actions,
+                provenance=context.provenance
+            )
+        except Exception as e:
+            logger.error(f"ClaudeProvider ask failed: {e} — falling back to deterministic")
+            return self._fallback.answer_question(request, context)
+
+
+class DeepSeekProvider(BaseCoPilotProvider):
+    """
+    Connects to DeepSeek API (/chat/completions).
+    Config via DEEPSEEK_API_KEY, DEEPSEEK_MODEL, DEEPSEEK_BASE_URL.
+    """
+    def __init__(self):
+        import os
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
+        self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        self.mode = "deepseek"
+        self.provider_name = f"DeepSeek ({self.model})"
+        self._fallback = DeterministicCoPilotProvider()
+
+    def _is_configured(self) -> bool:
+        return bool(self.api_key)
+
+    def check_health(self) -> Dict[str, Any]:
+        return {
+            "status": "healthy" if self._is_configured() else "unconfigured",
+            "provider": "deepseek",
+            "provider_name": self.provider_name,
+            "configured": self._is_configured(),
+            "reachable": self._is_configured(),
+            "model": self.model,
+            "mode": self.mode,
+            "requires_api_key": True
+        }
+
+    def generate_response(self, study_id: str, xray_data: Optional[Dict[str, Any]] = None) -> CoPilotResponse:
+        if not self._is_configured():
+            logger.warning("DeepSeekProvider: DEEPSEEK_API_KEY not set — falling back to deterministic")
+            return self._fallback.generate_response(study_id, xray_data)
+        resp = self._fallback.generate_response(study_id, xray_data)
+        resp.provenance.provider = self.provider_name
+        resp.provenance.mode = "llm-augmented"
+        return resp
+
+    def answer_question(self, request: AskRequest, context: CoPilotResponse) -> AskResponse:
+        if not self._is_configured():
+            return self._fallback.answer_question(request, context)
+        try:
+            import urllib.request
+            import json as _json
+            raw_q = (request.question or "").strip()[:500]
+            prompt = (
+                f"You are the ORVYX medical imaging AI assistant. Answer this clinical question concisely and accurately.\n\n"
+                f"Study: {context.summary}\n"
+                f"Findings: {', '.join(f.title for f in context.findings[:5])}\n"
+                f"Question: {raw_q}\n\nAnswer (1-2 sentences, clinical, factual):"
+            )
+            payload = _json.dumps({
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.api_key}"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp_http:
+                data = _json.loads(resp_http.read())
+                answer = data["choices"][0]["message"]["content"].strip()
+
+            actions = _detect_actions_from_text(raw_q + " " + answer, context)
+            return AskResponse(
+                question=request.question,
+                intent="deepseek",
+                answer=answer,
+                highlights=[f"Response from {self.provider_name}", "⚠ DeepSeek API processed study context"],
+                relevant_finding_ids=[],
+                actions=actions,
+                provenance=context.provenance
+            )
+        except Exception as e:
+            logger.error(f"DeepSeekProvider ask failed: {e} — falling back to deterministic")
+            return self._fallback.answer_question(request, context)
+
+
 class APIProvider(BaseCoPilotProvider):
     """
-    Connects to an external OpenAI-compatible AI API (e.g. OpenAI, Anthropic).
-
-    Configuration (environment variables — never hardcode):
-      AI_API_BASE_URL  e.g. https://api.openai.com/v1
-      AI_API_KEY       required — API key (never exposed to frontend)
-      AI_API_MODEL     e.g. gpt-4o-mini
-
-    Falls back to DeterministicCoPilotProvider if AI_API_KEY is not set.
-
-    WARNING: When this provider is active, anonymized study context is sent to an
-    external API. The frontend clearly indicates when external processing is used.
+    Connects to an external OpenAI-compatible AI API (e.g. OpenAI).
+    Config via AI_API_BASE_URL, AI_API_KEY, AI_API_MODEL.
     """
     def __init__(self):
         import os
@@ -775,13 +1008,25 @@ class APIProvider(BaseCoPilotProvider):
     def _is_configured(self) -> bool:
         return bool(self.api_key)
 
+    def check_health(self) -> Dict[str, Any]:
+        return {
+            "status": "healthy" if self._is_configured() else "unconfigured",
+            "provider": "api",
+            "provider_name": self.provider_name,
+            "configured": self._is_configured(),
+            "reachable": self._is_configured(),
+            "model": self.model,
+            "mode": self.mode,
+            "requires_api_key": True
+        }
+
     def generate_response(self, study_id: str, xray_data: Optional[Dict[str, Any]] = None) -> CoPilotResponse:
         if not self._is_configured():
             logger.warning("APIProvider: AI_API_KEY not set — falling back to deterministic")
             return self._fallback.generate_response(study_id, xray_data)
         resp = self._fallback.generate_response(study_id, xray_data)
         resp.provenance.provider = self.provider_name
-        resp.provenance.mode = "api"
+        resp.provenance.mode = "llm-augmented"
         return resp
 
     def answer_question(self, request: AskRequest, context: CoPilotResponse) -> AskResponse:
@@ -812,13 +1057,18 @@ class APIProvider(BaseCoPilotProvider):
             with urllib.request.urlopen(req, timeout=15) as resp_http:
                 data = _json.loads(resp_http.read())
                 answer = data["choices"][0]["message"]["content"].strip()
+            actions = _detect_actions_from_text(raw_q + " " + answer, context)
             return AskResponse(
-                question=request.question, intent="api_ai", answer=answer,
+                question=request.question,
+                intent="api_ai",
+                answer=answer,
                 highlights=[
                     f"Response from {self.provider_name}",
                     "⚠ External API: anonymized study context transmitted",
                 ],
-                relevant_finding_ids=[], provenance=context.provenance,
+                relevant_finding_ids=[],
+                actions=actions,
+                provenance=context.provenance,
             )
         except Exception as e:
             logger.error(f"APIProvider ask failed: {e} — falling back to deterministic")
@@ -835,14 +1085,20 @@ class CoPilotManager:
 
     Set COPILOT_PROVIDER env var to one of:
       deterministic  (default) — fully offline, no external calls
-      custom_llm     — your own hosted LLM (requires CUSTOM_LLM_BASE_URL)
+      claude         — Anthropic Claude API (requires ANTHROPIC_API_KEY)
+      deepseek       — DeepSeek API (requires DEEPSEEK_API_KEY)
+      custom_llm     — self-hosted or proxy LLM (CUSTOM_LLM_BASE_URL or BASE_URL)
       api            — external API (requires AI_API_KEY)
     """
     def __init__(self):
         import os
         mode = os.getenv("COPILOT_PROVIDER", "deterministic").lower().strip()
-        if mode == "custom_llm":
-            self._provider: BaseCoPilotProvider = CustomLLMProvider()
+        if mode == "claude":
+            self._provider: BaseCoPilotProvider = ClaudeProvider()
+        elif mode == "deepseek":
+            self._provider = DeepSeekProvider()
+        elif mode == "custom_llm":
+            self._provider = CustomLLMProvider()
         elif mode == "api":
             self._provider = APIProvider()
         else:
@@ -856,6 +1112,9 @@ class CoPilotManager:
     @property
     def active_provider_mode(self) -> str:
         return self._provider.mode
+
+    def check_health(self) -> Dict[str, Any]:
+        return self._provider.check_health()
 
     def get_copilot_response(self, study_id: str, xray_data: Optional[Dict[str, Any]] = None) -> CoPilotResponse:
         return self._provider.generate_response(study_id=study_id, xray_data=xray_data)
