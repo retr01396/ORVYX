@@ -158,7 +158,8 @@ export const Volume3DViewer: React.FC<Volume3DViewerProps> = ({
       renderer.dispose();
       canvas.remove();
       scene.clear();
-      meshesMapRef.current.clear();
+      const map = meshesMapRef.current;
+      map.clear();
     };
   }, []);
 

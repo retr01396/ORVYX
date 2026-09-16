@@ -12,7 +12,7 @@ import { ThoracicReconstructionViewer } from './components/reconstruction/Thorac
 import { ReconstructionPanel } from './components/reconstruction/ReconstructionPanel';
 import type { StudySummary, StudyState, Centroid, Finding } from './types/studystate';
 import type { CTStudyMetadata, CrosshairPosition } from './types/ct';
-import type { CoPilotResponse, CoPilotFinding, CoPilotMeasurement } from './types/copilot';
+import type { CoPilotResponse, CoPilotFinding, CoPilotMeasurement, CopilotAction } from './types/copilot';
 import type { ThoracicStructure, ReconstructionPhase } from './types/reconstruction';
 import { FINDING_TO_3D_STRUCTURE } from './types/reconstruction';
 
@@ -412,6 +412,32 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleExecuteCoPilotAction = (action: CopilotAction) => {
+    if (action.type === 'NAVIGATE_VIEW' && action.view) {
+      setViewMode(action.view);
+    }
+    if ((action.type === 'FOCUS_STRUCTURE' || action.type === 'SHOW_STRUCTURE') && action.target_id) {
+      if (action.target_id === 'rib_cage') {
+        setViewMode('reconstruction');
+        setReconHighlightedIds(['rib_cage']);
+      } else if (ctMetadata?.structures) {
+        const s = ctMetadata.structures.find((item) => item.id === action.target_id);
+        if (s) {
+          if (action.view === '3d') {
+            setViewMode('3d');
+          } else if (action.view === 'ct' || !action.view) {
+            setViewMode('ct');
+          }
+          handleFocusCTStructure(s.id, s.voxel_centroid);
+        }
+      }
+    }
+    if (action.type === 'FOCUS_FINDING' && action.target_id) {
+      const finding = copilotData?.findings.find((f) => f.id === action.target_id);
+      if (finding) handleSelectCoPilotFinding(finding);
+    }
+  };
+
   const currentResult = studyStates[selectedStudyId];
   const currentStudy = studies.find((s) => s.study_id === selectedStudyId);
 
@@ -683,6 +709,7 @@ export const App: React.FC = () => {
               setReconstructionPhase('building');
               setReconstructionProgress(45);
             }}
+            onExecuteAction={handleExecuteCoPilotAction}
           />
         )}
       </div>

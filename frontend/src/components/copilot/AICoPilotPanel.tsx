@@ -16,6 +16,7 @@ import type {
   CoPilotFinding,
   CoPilotMeasurement,
   AskResponse,
+  CopilotAction,
 } from '../../types/copilot';
 
 interface ProviderInfo {
@@ -35,6 +36,7 @@ interface AICoPilotPanelProps {
   onSelectMeasurement: (measurement: CoPilotMeasurement) => void;
   selectedFindingId: string | null;
   onViewIn3DRecon?: (structureId: string) => void;
+  onExecuteAction?: (action: CopilotAction) => void;
 }
 
 const PREDEFINED_PROMPTS = [
@@ -54,6 +56,7 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
   onSelectMeasurement,
   selectedFindingId,
   onViewIn3DRecon,
+  onExecuteAction,
 }) => {
   const [question, setQuestion] = useState<string>('');
   const [asking, setAsking] = useState<boolean>(false);
@@ -89,6 +92,11 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
 
       const result: AskResponse = await res.json();
       setAskResult(result);
+
+      // Automatically execute actions emitted by the clinical inquiry engine
+      if (result.actions && result.actions.length > 0 && onExecuteAction) {
+        result.actions.forEach((act) => onExecuteAction(act));
+      }
     } catch (err: any) {
       console.error('Ask Co-Pilot failed:', err);
       setAskError(err.message || 'Failed to process clinical query');
@@ -103,7 +111,11 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
   };
 
   return (
-    <aside className="w-96 bg-slate-900/95 border-l border-slate-800 flex flex-col h-full select-none overflow-hidden shrink-0 z-30 shadow-2xl backdrop-blur-md">
+    <aside
+      role="complementary"
+      aria-label="AI Co-Pilot Panel"
+      className="w-96 bg-slate-900/95 border-l border-slate-800 flex flex-col h-full select-none overflow-hidden shrink-0 z-30 shadow-2xl backdrop-blur-md"
+    >
       {/* 1. Panel Header */}
       <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
         <div className="flex items-center gap-2.5">
@@ -431,6 +443,33 @@ export const AICoPilotPanel: React.FC<AICoPilotPanelProps> = ({
                           <Focus className="w-3 h-3" />
                           <span>Focus</span>
                         </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {askResult.actions && askResult.actions.length > 0 && (
+                    <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                      <span className="text-[10px] font-mono text-purple-300 font-semibold block">
+                        Recommended Clinical Actions:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {askResult.actions.map((act, actIdx) => (
+                          <button
+                            key={actIdx}
+                            type="button"
+                            onClick={() => onExecuteAction?.(act)}
+                            className="px-2 py-1 rounded bg-purple-900/40 text-purple-200 hover:bg-purple-800/60 border border-purple-500/40 text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                          >
+                            <ChevronRight className="w-3 h-3 text-purple-400" />
+                            <span>
+                              {act.type === 'NAVIGATE_VIEW'
+                                ? `Open ${act.view === 'reconstruction' ? '3D Recon' : act.view?.toUpperCase()}`
+                                : act.type === 'FOCUS_STRUCTURE'
+                                ? `Focus ${act.target_id?.replace('_', ' ')}`
+                                : act.target_id || act.type}
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}

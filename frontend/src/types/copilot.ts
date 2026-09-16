@@ -61,6 +61,13 @@ export interface CoPilotResponse {
   provenance: CoPilotProvenance;
 }
 
+export interface CopilotAction {
+  type: 'SHOW_STRUCTURE' | 'FOCUS_STRUCTURE' | 'FOCUS_FINDING' | 'NAVIGATE_VIEW';
+  target_id?: string;
+  view?: 'xray' | 'ct' | '3d' | 'reconstruction';
+  parameters?: Record<string, any>;
+}
+
 export interface AskResponse {
   question: string;
   intent: string;
@@ -68,6 +75,7 @@ export interface AskResponse {
   highlights: string[];
   relevant_finding_ids: string[];
   target_structure_id?: string;
-  target_view?: 'xray' | 'ct';
+  target_view?: 'xray' | 'ct' | '3d' | 'reconstruction';
+  actions?: CopilotAction[];
   provenance: CoPilotProvenance;
 }

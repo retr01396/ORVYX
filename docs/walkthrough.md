@@ -87,15 +87,43 @@ All test suites executed against the live application and passed 100%:
 | **Phase 4** (`smoke_test_phase4.py`) | 3D Reconstruction & Multi-Provider Fallback | **42 / 42 PASSED** |
 | **Phase 5** (`smoke_test_phase5.py`) | Custom Radiograph Ingestion & Dynamic Workflow | **25 / 25 PASSED** |
 | **Phase 6** (`smoke_test_phase6.py`) | Security, Path Traversal & Production Hardening | **46 / 46 PASSED** |
-| **New Health & Action Tests** | `/api/ai/health`, `/api/copilot/health`, Skeleton Mesh | **PASSED** |
-| **Cumulative Total** | **All Verification Test Suites** | **167 / 167 PASSED (100%)** |
+| **Phase 7** (`smoke_test_phase7.py`) | Runtime Diagnostics, Asset Verification & Action Emitting | **34 / 34 PASSED** |
+| **Cumulative Total** | **All Verification Smoke Test Suites** | **201 / 201 PASSED (100%)** |
 
-### 4.2 Frontend Production Build
+### 4.2 Headless Browser Automation Suite (Brave / Chromium)
+Automated end-to-end integration tests executed directly against the live Vite frontend and FastAPI backend using Puppeteer (`scripts/test_runtime_browser.mjs`):
+
+| Check # | Test / Assertion | Result |
+|---------|------------------|--------|
+| **1** | Page loads successfully (`http://localhost:5173`) | **PASS** |
+| **2** | Disclaimer banner visible and dismissable | **PASS** |
+| **3** | 2D Radiograph renders cleanly ($512 \times 512$, non-blank) | **PASS** |
+| **4** | TorchXRayVision 18 findings rendered in InsightsPanel | **PASS** |
+| **5** | 2D Segmentation overlay configured with active alpha transparency | **PASS** |
+| **6** | Study switch to `demo-2` loads findings seamlessly | **PASS** |
+| **7** | All 3 CT orthogonal planes present (Axial, Coronal, Sagittal) | **PASS** |
+| **8** | CT slice images fetched from backend (3 orthogonal slices) | **PASS** |
+| **9** | CT grayscale slices render without distortion or blankness | **PASS** |
+| **10** | Window presets toggle cleanly (Lung vs Mediastinum) | **PASS** |
+| **11** | 3D Canvas exists and WebGL initializes | **PASS** |
+| **12** | 3D Viewer survived 5x rapid remount stress test without WebGL context loss or duplicate canvases | **PASS** |
+| **13** | 3D Viewer survived cross-modality switching (CT/MPR <-> 3D) | **PASS** |
+| **14** | Thoracic reconstruction panel renders 2D X-ray card preview | **PASS** |
+| **15** | Thoracic reconstruction renders 60 FPS badge and particle HUD | **PASS** |
+| **16** | 3D Reconstruction WebGL canvas active | **PASS** |
+| **17** | Reconstruction interactive controls (Replay, Reset, Auto-Rotate) present | **PASS** |
+| **18** | Co-Pilot answers "Show me the rib cage" with CT skeleton geometry (62,027 vertices) | **PASS** |
+| **19** | Co-Pilot UI executes structured action and provides interactive action buttons | **PASS** |
+| **20** | Co-Pilot answers "Focus on the heart" with quantitative measurements (484.1 mL) | **PASS** |
+| **21** | Zero uncaught browser console errors during session (Clean console) | **PASS** |
+| **Total** | **Browser Automation Suite** | **21 / 21 CHECKS PASSED (100%)** |
+
+### 4.3 Frontend Production Build
 ```
 vite v8.3.0 building client environment for production...
 ✓ 1884 modules transformed.
 dist/index.html                   0.45 kB │ gzip:   0.29 kB
-dist/assets/index-Do996w3U.css   60.76 kB │ gzip:   9.87 kB
-dist/assets/index-TDTUnrhE.js   907.31 kB │ gzip: 240.61 kB
-✓ built in 189ms (0 TypeScript / bundling errors)
+dist/assets/index-Df4iY8sz.css   61.22 kB │ gzip:   9.92 kB
+dist/assets/index-DoEcjgxy.js   908.78 kB │ gzip: 240.99 kB
+✓ built in 188ms (0 TypeScript / bundling errors)
 ```
